@@ -1,0 +1,21 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "cacao-nib"
+requires-python = ">=3.10"
+dynamic = ["version"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "cacao_nib.cacao_nib"
+
+[dependency-groups]
+dev = [
+    "maturin",
+    "pytest",
+    "ruff",
+    "pre-commit",
+]
