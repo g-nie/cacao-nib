@@ -2,6 +2,8 @@
 
 **Goal:** prove the architecture end-to-end with a single trivial rule. Python-only. No tests. No cross-file. No semantic model yet.
 
+**Naming:** distribution is `cacao-nib` (PyPI), but the Python import name is `nib` and the CLI binary is `nib`. There's a stale `nib` package on PyPI (an abandoned static site generator); we accept the small collision risk since users rarely have it installed.
+
 ## Stack
 
 - `pyo3` + `maturin` for the Rust↔Python boundary
@@ -12,7 +14,7 @@
 
 ### 1. Skeleton
 
-- `maturin new` confirmed; `import cacao_nib` works from Python.
+- `maturin new` confirmed; `import nib` works from Python. (Wheel ships a top-level `nib/` package; `pyproject.toml` sets `module-name = "nib.nib"` and `[project.scripts] nib = "nib.cli:main"`.)
 - Add `tree-sitter` deps; parse one hardcoded Python file in Rust and print the root node kind. Throw this code away after.
 
 ### 2. The 5 AST wrappers
@@ -29,7 +31,7 @@ Each wraps a `tree_sitter::Node` + `Arc<[u8]>` source. Getters are lazy. Add one
 
 ### 3. Visitor dispatcher
 
-- Define a Python-side `Rule` base class (in `cacao_nib/__init__.py` shipped with the wheel).
+- Define a Python-side `Rule` base class (in `nib/__init__.py` shipped with the wheel).
 - At rule-registration time, introspect: `[m for m in dir(rule) if m.startswith("visit_")]` → build a `HashSet<&'static str>` of kinds the rule cares about (map `visit_Call` → tree-sitter kind `"call"`).
 - Rust walks the tree with a cursor. On each node, if its kind is in the set, wrap it and call `rule.visit_<Kind>(wrapped_node)`. Collect yielded `Diagnostic`s.
 
@@ -43,7 +45,7 @@ Each wraps a `tree_sitter::Node` + `Arc<[u8]>` source. Getters are lazy. Add one
 Ship one rule inline as an example:
 
 ```python
-from cacao_nib import Rule, Diagnostic, ast
+from nib import Rule, Diagnostic, ast
 
 class NoEval(Rule):
     code = "X001"
@@ -56,11 +58,11 @@ class NoEval(Rule):
 
 A separate package — not part of `cacao-nib` — should be able to define its own rule and have `cacao-nib` load it. This is the whole point of the project, so prove it works end-to-end in the MVP.
 
-No wrapper class. The third-party package just exposes a module-level `rules` list. Create a tiny throwaway package alongside the project — `examples/cacao_nib_demo/` with its own `pyproject.toml` — that depends on `cacao-nib`:
+No wrapper class. The third-party package just exposes a module-level `rules` list. Create a tiny throwaway package alongside the project — `examples/nib_demo/` with its own `pyproject.toml` — that depends on `cacao-nib`:
 
 ```python
-# examples/cacao_nib_demo/cacao_nib_demo/__init__.py
-from cacao_nib import Rule, Diagnostic, ast
+# examples/nib_demo/nib_demo/__init__.py
+from nib import Rule, Diagnostic, ast
 
 class NoPrint(Rule):
     code = "DEMO001"
@@ -71,15 +73,15 @@ class NoPrint(Rule):
 rules = [NoPrint()]
 ```
 
-`pip install -e examples/cacao_nib_demo` should make it loadable.
+`pip install -e examples/nib_demo` should make it loadable.
 
 ### 7. CLI
 
-- `cacao-nib check <path>` — recursively finds `.py` files, parses each, runs registered rules, prints diagnostics in `path:line:col: CODE message` format.
+- `nib check <path>` — recursively finds `.py` files, parses each, runs registered rules, prints diagnostics in `path:line:col: CODE message` format.
 - `--rules module:attr` flag (repeatable) — imports `module`, looks up `attr`, expects an iterable of `Rule` instances, registers them. Built-in rules (e.g. `NoEval`) are always loaded.
 - Verify with:
   ```
-  cacao-nib check foo.py --rules cacao_nib_demo:rules
+  nib check foo.py --rules nib_demo:rules
   ```
   Both `X001` (built-in) and `DEMO001` (third-party) diagnostics should appear.
 - Defer the TOML config file.
@@ -90,7 +92,7 @@ Don't add: the semantic model, the project index, fix application, parallelism, 
 
 ## What this proves
 
-By the end you can run `cacao-nib check foo.py` and have a Python-authored rule, dispatched from Rust, flag `eval(...)` calls. Every architectural decision is exercised — the wrappers, the dispatcher, the FFI boundary, the diagnostic flow. Everything else is filling in this skeleton.
+By the end you can run `nib check foo.py` and have a Python-authored rule, dispatched from Rust, flag `eval(...)` calls. Every architectural decision is exercised — the wrappers, the dispatcher, the FFI boundary, the diagnostic flow. Everything else is filling in this skeleton.
 
 ## The natural next milestone (not MVP, but the obvious follow-up)
 
@@ -108,12 +110,12 @@ The MVP uses an explicit `--rules module:attr` CLI flag because it's the smalles
 - Third-party packages declare themselves in their own `pyproject.toml`:
 
   ```toml
-  [project.entry-points."cacao_nib.rules"]
-  cacao_nib_demo = "cacao_nib_demo:rules"
+  [project.entry-points."nib.rules"]
+  nib_demo = "nib_demo:rules"
   ```
 
-- `cacao-nib` discovers them at startup with `entry_points(group="cacao_nib.rules")` — no CLI flag, no config. `pip install` is the only user action.
+- `nib` discovers them at startup with `entry_points(group="nib.rules")` — no CLI flag, no config. `pip install` is the only user action.
 
 - Keep `--rules` as a dev-time override (load a local package without installing it), but make entry points the primary path.
 
-- Pair with a `[tool.cacao-nib] select = [...]` config in pyproject.toml to let users opt rules in/out by code, matching the Ruff/flake8 UX.
+- Pair with a `[tool.nib] select = [...]` config in pyproject.toml to let users opt rules in/out by code, matching the Ruff/flake8 UX.
