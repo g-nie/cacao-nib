@@ -57,7 +57,7 @@ def test_visitor_multiple_rules_distinct_codes():
 def test_non_diagnostic_returns_pass_through():
     mod = nib.parse_module("eval(eval('x'))\n")
     diags = nib.run(mod, [CountNames()])
-    assert diags.count("eval") == 2
+    assert diags == ["eval", "eval"]
 
 
 def test_visit_module_fires_once():
