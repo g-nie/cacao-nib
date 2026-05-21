@@ -101,6 +101,9 @@ By the end you can run `nib check foo.py` and have a Python-authored rule, dispa
 - Add the project index (two `DashMap`s, populated by a pre-pass).
 - Implement the Django signal rule as the second example.
 - **Parse-error handling.** Tree-sitter is error-tolerant — it returns a tree with `ERROR` nodes for invalid syntax instead of failing. `parse_module` should check `tree.root_node().has_error()` and refuse to lint files that don't parse cleanly (emit a single `E000` diagnostic and skip rule dispatch), matching Ruff's behavior. Otherwise rules silently lint partially-broken code.
+- **Rule-author warnings (CLI).** Currently invalid rules fail silently or with cryptic PyO3 errors. The CLI should surface these as warnings at startup, naming the offending rule + method:
+  - **Unknown `visit_*` name** — e.g. `visit_Cal` (typo) registers no kinds. Warn: `RuleX.visit_Cal targets unknown AST class 'Cal'. Known: Module, Call, ...`. Validation point: `build_dispatch`.
+  - **Bad return type** — a rule that returns `Diagnostic(...)` instead of `[Diagnostic(...)]` blows up in `try_iter` with no rule context. Wrap the failure with: `RuleX.visit_Call returned <type>, expected None or list of Diagnostic`. Validation point: `fire_methods`. Thread `rule.__class__.__name__` through `DispatchEntry` to make these messages useful.
 
 That's when the architecture stops being a demo and starts being interesting. Keep it out of the MVP — you'll learn things in step 5 that change how you'd build the index.
 
