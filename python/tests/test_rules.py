@@ -7,7 +7,7 @@ class NoEval(nib.Rule):
 
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id == "eval":
-            yield Diagnostic(node, "no eval")
+            return [Diagnostic(node, "no eval")]
 
 
 class NoPrint(nib.Rule):
@@ -15,19 +15,19 @@ class NoPrint(nib.Rule):
 
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id == "print":
-            yield Diagnostic(node, "no print")
+            return [Diagnostic(node, "no print")]
 
 
 class CountNames(nib.Rule):
     def visit_Name(self, node):
-        yield node.id  # not a Diagnostic — should pass through untouched
+        return [node.id]  # not a Diagnostic — should pass through untouched
 
 
 class ModuleVisitor(nib.Rule):
     code = "MOD"
 
     def visit_Module(self, node):
-        yield Diagnostic(node, f"saw {len(node.body)} statements")
+        return [Diagnostic(node, f"saw {len(node.body)} statements")]
 
 
 def test_visitor_fires_on_matching_node():
@@ -54,10 +54,9 @@ def test_visitor_multiple_rules_distinct_codes():
     assert codes == ["X001", "X002"]
 
 
-def test_non_diagnostic_yields_pass_through():
+def test_non_diagnostic_returns_pass_through():
     mod = nib.parse_module("eval(eval('x'))\n")
     diags = nib.run(mod, [CountNames()])
-    # CountNames yields strings, not Diagnostics — should arrive as plain strings.
     assert diags.count("eval") == 2
 
 
@@ -75,6 +74,21 @@ def test_diagnostic_span_pulled_from_node():
     assert len(diags) == 1
     d = diags[0]
     assert d.lineno == 1
-    assert d.col_offset == 4  # after the 4-space indent
+    assert d.col_offset == 4
     assert d.end_lineno == 1
-    assert d.end_col_offset == 14  # eval('hi') ends at col 14
+    assert d.end_col_offset == 14
+
+
+def test_multiple_diagnostics_from_one_node():
+    """A single visit_* call can return more than one diagnostic."""
+
+    class FlagEachArg(nib.Rule):
+        code = "ARG"
+
+        def visit_Call(self, node):
+            return [Diagnostic(arg, "arg") for arg in node.args]
+
+    mod = nib.parse_module("foo('a', 'b', 'c')\n")
+    diags = nib.run(mod, [FlagEachArg()])
+    assert len(diags) == 3
+    assert all(d.code == "ARG" for d in diags)

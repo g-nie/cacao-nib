@@ -33,7 +33,7 @@ Each wraps a `tree_sitter::Node` + `Arc<[u8]>` source. Getters are lazy. Add one
 
 - Define a Python-side `Rule` base class (in `nib/__init__.py` shipped with the wheel).
 - At rule-registration time, introspect: `[m for m in dir(rule) if m.startswith("visit_")]` → build a `HashSet<&'static str>` of kinds the rule cares about (map `visit_Call` → tree-sitter kind `"call"`).
-- Rust walks the tree with a cursor. On each node, if its kind is in the set, wrap it and call `rule.visit_<Kind>(wrapped_node)`. Collect yielded `Diagnostic`s.
+- Rust walks the tree with a cursor. On each node, if its kind is in the set, wrap it and call `rule.visit_<Kind>(wrapped_node)`. Collect returned `Diagnostic`s.
 
 ### 4. Diagnostic type
 
@@ -51,7 +51,7 @@ class NoEval(Rule):
     code = "X001"
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id == "eval":
-            yield Diagnostic(node, "no eval")
+            return [Diagnostic(node, "no eval")]
 ```
 
 ### 6. Third-party rule (proves extensibility)
@@ -68,7 +68,7 @@ class NoPrint(Rule):
     code = "DEMO001"
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id == "print":
-            yield Diagnostic(node, "no print()")
+            return [Diagnostic(node, "no print()")]
 
 rules = [NoPrint()]
 ```

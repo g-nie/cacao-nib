@@ -6,7 +6,7 @@ use std::collections::HashMap;
 ///
 /// `Diagnostic(node, message)` pulls the span from `node`'s `lineno`,
 /// `col_offset`, `end_lineno`, `end_col_offset` attributes. The `code` is
-/// filled in by the dispatcher after `yield` from the owning rule's `.code`
+/// filled in by the dispatcher after the rule returns it, from the owning rule's `.code`
 /// class attribute.
 #[pyclass(module = "nib")]
 pub(crate) struct Diagnostic {
@@ -67,7 +67,7 @@ fn kinds_for_visit(ast_name: &str) -> &'static [&'static str] {
 }
 
 /// Walk a parsed `Module` once, dispatching to each rule's `visit_*` methods.
-/// Returns the flat list of items yielded by all rules. Yielded `Diagnostic`s
+/// Returns the flat list of items returned by all rules. `Diagnostic` items
 /// have their `code` filled in from the owning rule's `code` attribute.
 #[pyfunction]
 pub(crate) fn run(
@@ -85,7 +85,7 @@ pub(crate) fn run(
 /// Introspect each rule once up-front. Maps tree-sitter kind -> bound visit_*
 /// methods so the hot walk loop is a single HashMap lookup per node. Records
 /// each rule's `code` attribute alongside its methods so the dispatcher can
-/// tag yielded `Diagnostic`s.
+/// tag returned `Diagnostic`s.
 fn build_dispatch(
     py: Python,
     rules: &[Py<PyAny>],
@@ -94,7 +94,7 @@ fn build_dispatch(
     for rule in rules {
         let bound = rule.bind(py);
         // Rules without a `code` attribute get an empty code; non-Diagnostic
-        // yields aren't tagged anyway.
+        // returns aren't tagged anyway.
         let code: String = bound
             .getattr("code")
             .ok()
@@ -139,7 +139,7 @@ fn walk_and_collect(
     let mut cursor = root.walk();
 
     'outer: loop {
-        // 1. Visit the current node: dispatch matching rules, collect yields.
+        // 1. Visit the current node: dispatch matching rules, collect returns.
         let node = cursor.node();
         if let Some(entries) = dispatch.get(node.kind()) {
             let n_ref = NodeRef::from_node(root_ref.tree.clone(), root_ref.source.clone(), node);
@@ -167,9 +167,14 @@ fn walk_and_collect(
     Ok(results)
 }
 
-/// Call every matched visit_* method on the wrapped node, draining any yielded
-/// items into `out`. Yielded `Diagnostic`s get their `code` filled in from the
-/// entry. Other yielded types pass through untouched.
+/// Call every matched visit_* method on the wrapped node and collect results.
+///
+/// A visit_* method should return either:
+/// - `None` (or fall off the end) — no diagnostics
+/// - an iterable of items — typically `list[Diagnostic]`
+///
+/// `Diagnostic` items get their `code` filled in from the rule's `code`
+/// attribute. Other item types pass through untouched.
 fn fire_methods(
     py: Python,
     entries: &[DispatchEntry],
@@ -178,14 +183,15 @@ fn fire_methods(
 ) -> PyResult<()> {
     for entry in entries {
         let ret = entry.method.bind(py).call1((wrapped.clone_ref(py),))?;
-        // A visit_* without `yield` returns None — skip rather than fail in try_iter.
+        // A visit_* that returns None means "no diagnostics" — skip rather
+        // than fail in try_iter (None isn't iterable).
         if ret.is_none() {
             continue;
         }
         for item in ret.try_iter()? {
             let item = item?;
-            // Tag Diagnostic instances with the rule's code. Cheap downcast;
-            // non-Diagnostic yields (e.g. raw tuples in tests) fall through.
+            // Tag Diagnostic instances with the rule's code. Cheap cast;
+            // non-Diagnostic items (e.g. raw values from tests) pass through.
             if let Ok(diag) = item.cast::<Diagnostic>() {
                 diag.borrow_mut().code = entry.code.clone();
             }
