@@ -1,3 +1,8 @@
-from .nib import ast, parse_module
+from .nib import ast, parse_module, run
 
-__all__ = ["ast", "parse_module"]
+
+class Rule:
+    """Subclass and define `visit_<AstName>` methods that yield diagnostics."""
+
+
+__all__ = ["Rule", "ast", "parse_module", "run"]

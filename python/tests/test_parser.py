@@ -32,7 +32,5 @@ def test_attribute_chain():
 
 
 def test_unsupported_node_kind_raises():
-    # `1 + 2` is a binary_operator — not yet wrapped. expression_statement -> binary_operator.
     mod = nib.parse_module("1 + 2\n")
-    # Module.body silently skips unwrappable exprs for now; should be empty.
     assert mod.body == []
