@@ -7,10 +7,12 @@ name = "cacao-nib"
 requires-python = ">=3.10"
 dynamic = ["version"]
 
+[project.scripts]
+nib = "nib.cli:main"
+
 [tool.maturin]
-features = ["pyo3/extension-module"]
 python-source = "python"
-module-name = "cacao_nib.cacao_nib"
+module-name = "nib.nib"
 
 [dependency-groups]
 dev = [
@@ -18,4 +20,5 @@ dev = [
     "pytest",
     "ruff",
     "pre-commit",
+    "ipython",
 ]
