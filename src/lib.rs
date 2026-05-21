@@ -8,6 +8,7 @@ use pyo3::types::PyModule as PyModuleType;
 fn nib(m: &Bound<'_, PyModuleType>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parser::parse_module, m)?)?;
     m.add_function(wrap_pyfunction!(rules::run, m)?)?;
+    m.add_class::<rules::Diagnostic>()?;
 
     let py = m.py();
     let ast = PyModuleType::new(py, "ast")?;

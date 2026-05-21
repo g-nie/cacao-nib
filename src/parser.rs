@@ -55,6 +55,16 @@ impl NodeRef {
     fn col_offset(&self) -> usize {
         self.node().start_position().column
     }
+
+    /// 1-based line number of the node's end position.
+    fn end_lineno(&self) -> usize {
+        self.node().end_position().row + 1
+    }
+
+    /// 0-based column offset of the node's end position.
+    fn end_col_offset(&self) -> usize {
+        self.node().end_position().column
+    }
 }
 
 #[pyclass(module = "nib.ast")]
@@ -85,6 +95,26 @@ impl Module {
             }
         }
         Ok(out)
+    }
+
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
     }
 }
 
@@ -139,6 +169,16 @@ impl Call {
     fn col_offset(&self) -> usize {
         self.inner.col_offset()
     }
+
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
 }
 
 #[pyclass(module = "nib.ast")]
@@ -164,6 +204,16 @@ impl Name {
     #[getter]
     fn col_offset(&self) -> usize {
         self.inner.col_offset()
+    }
+
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
     }
 }
 
@@ -208,6 +258,16 @@ impl Attribute {
     #[getter]
     fn col_offset(&self) -> usize {
         self.inner.col_offset()
+    }
+
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
     }
 }
 
@@ -266,6 +326,16 @@ impl Constant {
     #[getter]
     fn col_offset(&self) -> usize {
         self.inner.col_offset()
+    }
+
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
     }
 }
 

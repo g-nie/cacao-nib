@@ -2,6 +2,56 @@ use crate::parser::{Module, NodeRef, wrap_node};
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
+/// A lint finding emitted by a rule.
+///
+/// `Diagnostic(node, message)` pulls the span from `node`'s `lineno`,
+/// `col_offset`, `end_lineno`, `end_col_offset` attributes. The `code` is
+/// filled in by the dispatcher after `yield` from the owning rule's `.code`
+/// class attribute.
+#[pyclass(module = "nib")]
+pub(crate) struct Diagnostic {
+    #[pyo3(get, set)]
+    code: String,
+    #[pyo3(get, set)]
+    message: String,
+    #[pyo3(get)]
+    lineno: usize,
+    #[pyo3(get)]
+    col_offset: usize,
+    #[pyo3(get)]
+    end_lineno: usize,
+    #[pyo3(get)]
+    end_col_offset: usize,
+}
+
+#[pymethods]
+impl Diagnostic {
+    #[new]
+    fn new(node: &Bound<'_, PyAny>, message: String) -> PyResult<Self> {
+        Ok(Self {
+            code: String::new(),
+            message,
+            lineno: node.getattr("lineno")?.extract()?,
+            col_offset: node.getattr("col_offset")?.extract()?,
+            end_lineno: node.getattr("end_lineno")?.extract()?,
+            end_col_offset: node.getattr("end_col_offset")?.extract()?,
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Diagnostic(code={:?}, message={:?}, line={}, col={})",
+            self.code, self.message, self.lineno, self.col_offset
+        )
+    }
+}
+
+/// One bound `visit_*` method together with the `code` attribute of its rule.
+struct DispatchEntry {
+    method: Py<PyAny>,
+    code: String,
+}
+
 /// Map a `visit_<AstName>` method to the tree-sitter kinds it should fire on.
 /// Multiple kinds map to the same AST class (a `Constant` covers literals of
 /// several types).
@@ -17,8 +67,8 @@ fn kinds_for_visit(ast_name: &str) -> &'static [&'static str] {
 }
 
 /// Walk a parsed `Module` once, dispatching to each rule's `visit_*` methods.
-/// Returns the flat list of items yielded by all rules (raw Python objects for
-/// now; will become typed `Diagnostic`s later on).
+/// Returns the flat list of items yielded by all rules. Yielded `Diagnostic`s
+/// have their `code` filled in from the owning rule's `code` attribute.
 #[pyfunction]
 pub(crate) fn run(
     py: Python,
@@ -33,14 +83,23 @@ pub(crate) fn run(
 }
 
 /// Introspect each rule once up-front. Maps tree-sitter kind -> bound visit_*
-/// methods so the hot walk loop is a single HashMap lookup per node.
+/// methods so the hot walk loop is a single HashMap lookup per node. Records
+/// each rule's `code` attribute alongside its methods so the dispatcher can
+/// tag yielded `Diagnostic`s.
 fn build_dispatch(
     py: Python,
     rules: &[Py<PyAny>],
-) -> PyResult<HashMap<&'static str, Vec<Py<PyAny>>>> {
-    let mut dispatch: HashMap<&'static str, Vec<Py<PyAny>>> = HashMap::new();
+) -> PyResult<HashMap<&'static str, Vec<DispatchEntry>>> {
+    let mut dispatch: HashMap<&'static str, Vec<DispatchEntry>> = HashMap::new();
     for rule in rules {
         let bound = rule.bind(py);
+        // Rules without a `code` attribute get an empty code; non-Diagnostic
+        // yields aren't tagged anyway.
+        let code: String = bound
+            .getattr("code")
+            .ok()
+            .and_then(|c| c.extract().ok())
+            .unwrap_or_default();
         for attr in bound.dir()?.iter() {
             let name: String = attr.extract()?;
             // Skip anything that isn't a visit_* method.
@@ -57,7 +116,10 @@ fn build_dispatch(
             // covers (visit_Constant -> integer, float, string, ...).
             let method = bound.getattr(&name)?.unbind();
             for kind in kinds {
-                dispatch.entry(kind).or_default().push(method.clone_ref(py));
+                dispatch.entry(kind).or_default().push(DispatchEntry {
+                    method: method.clone_ref(py),
+                    code: code.clone(),
+                });
             }
         }
     }
@@ -68,7 +130,7 @@ fn build_dispatch(
 fn walk_and_collect(
     py: Python,
     root_ref: &NodeRef,
-    dispatch: &HashMap<&'static str, Vec<Py<PyAny>>>,
+    dispatch: &HashMap<&'static str, Vec<DispatchEntry>>,
 ) -> PyResult<Vec<Py<PyAny>>> {
     let mut results = Vec::new();
     let root = root_ref.node();
@@ -79,10 +141,10 @@ fn walk_and_collect(
     'outer: loop {
         // 1. Visit the current node: dispatch matching rules, collect yields.
         let node = cursor.node();
-        if let Some(methods) = dispatch.get(node.kind()) {
+        if let Some(entries) = dispatch.get(node.kind()) {
             let n_ref = NodeRef::from_node(root_ref.tree.clone(), root_ref.source.clone(), node);
             if let Some(wrapped) = wrap_node(py, &n_ref)? {
-                fire_methods(py, methods, &wrapped, &mut results)?;
+                fire_methods(py, entries, &wrapped, &mut results)?;
             }
         }
 
@@ -106,20 +168,28 @@ fn walk_and_collect(
 }
 
 /// Call every matched visit_* method on the wrapped node, draining any yielded
-/// items into `out`. A visit_* without `yield` returns None — skip it.
+/// items into `out`. Yielded `Diagnostic`s get their `code` filled in from the
+/// entry. Other yielded types pass through untouched.
 fn fire_methods(
     py: Python,
-    methods: &[Py<PyAny>],
+    entries: &[DispatchEntry],
     wrapped: &Py<PyAny>,
     out: &mut Vec<Py<PyAny>>,
 ) -> PyResult<()> {
-    for method in methods {
-        let ret = method.bind(py).call1((wrapped.clone_ref(py),))?;
+    for entry in entries {
+        let ret = entry.method.bind(py).call1((wrapped.clone_ref(py),))?;
+        // A visit_* without `yield` returns None — skip rather than fail in try_iter.
         if ret.is_none() {
             continue;
         }
         for item in ret.try_iter()? {
-            out.push(item?.unbind());
+            let item = item?;
+            // Tag Diagnostic instances with the rule's code. Cheap downcast;
+            // non-Diagnostic yields (e.g. raw tuples in tests) fall through.
+            if let Ok(diag) = item.cast::<Diagnostic>() {
+                diag.borrow_mut().code = entry.code.clone();
+            }
+            out.push(item.unbind());
         }
     }
     Ok(())
