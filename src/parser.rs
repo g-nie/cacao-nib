@@ -286,10 +286,11 @@ impl Constant {
         let txt = self.inner.text();
         match self.inner.node().kind() {
             "integer" => {
-                let v: i64 = txt.parse().map_err(|e: std::num::ParseIntError| {
-                    pyo3::exceptions::PyValueError::new_err(e.to_string())
-                })?;
-                Ok(v.into_pyobject(py)?.into_any().unbind())
+                // Delegate to Python's int(txt, 0) — it handles every valid
+                // Python int literal: decimal, 0x/0o/0b, underscore separators,
+                // and arbitrary precision (Rust's i64 caps at 64 bits).
+                let int_type = py.import("builtins")?.getattr("int")?;
+                Ok(int_type.call1((txt, 0))?.unbind())
             }
             "float" => {
                 let v: f64 = txt.parse().map_err(|e: std::num::ParseFloatError| {
@@ -339,14 +340,348 @@ impl Constant {
     }
 }
 
+#[pyclass(module = "nib.ast")]
+pub(crate) struct Subscript {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl Subscript {
+    /// The container being indexed — `arr` in `arr[0]`, `d` in `d['k']`.
+    #[getter]
+    fn value(&self, py: Python) -> PyResult<Py<PyAny>> {
+        let node = self.inner.node();
+        let value_node = node
+            .child_by_field_name("value")
+            .ok_or_else(|| pyo3::exceptions::PyAttributeError::new_err("subscript has no value"))?;
+        wrap_node_or_err(py, &self.inner.child_with(value_node))
+    }
+
+    /// The index expression inside the brackets — matches CPython's
+    /// `ast.Subscript.slice`. For `a[1:2]` this would be a `slice` node, which
+    /// we don't yet have a wrapper for (returns None via the lenient wrap).
+    #[getter]
+    fn slice(&self, py: Python) -> PyResult<Option<Py<PyAny>>> {
+        let node = self.inner.node();
+        // Tree-sitter-python's subscript node uses field name "subscript" for
+        // the bracketed index expression(s). For `a[0]` there's a single child.
+        let Some(slice_node) = node.child_by_field_name("subscript") else {
+            return Ok(None);
+        };
+        wrap_node(py, &self.inner.child_with(slice_node))
+    }
+
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct IfExp {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl IfExp {
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct BoolOp {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl BoolOp {
+    /// "and" or "or", matching the keyword used in the source.
+    #[getter]
+    fn op(&self) -> PyResult<String> {
+        let node = self.inner.node();
+        let op_node = node.child_by_field_name("operator").ok_or_else(|| {
+            pyo3::exceptions::PyAttributeError::new_err("boolean_operator has no operator")
+        })?;
+        Ok(op_node.kind().to_string())
+    }
+
+    /// All operands of the same-op chain, flattened. Tree-sitter parses
+    /// `a or b or c` as nested binary BoolOps; CPython's `ast.BoolOp` flattens
+    /// these into a single n-ary node, so we match that. Different-op chains
+    /// stay nested (`a or b and c` → BoolOp(or, [a, BoolOp(and, [b, c])])).
+    #[getter]
+    fn values(&self, py: Python) -> PyResult<Vec<Py<PyAny>>> {
+        let node = self.inner.node();
+        let op = node
+            .child_by_field_name("operator")
+            .map(|n| n.kind())
+            .unwrap_or("");
+        let mut out = Vec::new();
+        self.collect_chain(py, node, op, &mut out)?;
+        Ok(out)
+    }
+
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+impl BoolOp {
+    /// Recurse into `left`/`right` while they're boolean_operators with the
+    /// same operator; collect everything else as a single value.
+    fn collect_chain(
+        &self,
+        py: Python,
+        node: Node,
+        op: &str,
+        out: &mut Vec<Py<PyAny>>,
+    ) -> PyResult<()> {
+        for field in ["left", "right"] {
+            let Some(child) = node.child_by_field_name(field) else {
+                continue;
+            };
+            let same_op = child.kind() == "boolean_operator"
+                && child
+                    .child_by_field_name("operator")
+                    .map(|n| n.kind() == op)
+                    .unwrap_or(false);
+            if same_op {
+                self.collect_chain(py, child, op, out)?;
+            } else if let Some(wrapped) = wrap_node(py, &self.inner.child_with(child))? {
+                out.push(wrapped);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct Lambda {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl Lambda {
+    /// Parameter names. Bare params (`x`), default params (`y=1`), and
+    /// `*args`/`**kwargs` all contribute their identifier. Returns
+    /// `list[Name]` so rules can inspect names or just count via `len()`.
+    #[getter]
+    fn args(&self, py: Python) -> PyResult<Vec<Py<PyAny>>> {
+        let node = self.inner.node();
+        let Some(params) = node.child_by_field_name("parameters") else {
+            return Ok(vec![]);
+        };
+        let mut cursor = params.walk();
+        let mut out = Vec::new();
+        for child in params.named_children(&mut cursor) {
+            // Pull the identifier out of common parameter shapes; ignore
+            // anything exotic for the MVP.
+            let id_node = match child.kind() {
+                "identifier" => Some(child),
+                "default_parameter" | "typed_parameter" | "typed_default_parameter" => {
+                    child.child_by_field_name("name")
+                }
+                "list_splat_pattern" | "dictionary_splat_pattern" => child.named_child(0),
+                _ => None,
+            };
+            if let Some(id) = id_node
+                && id.kind() == "identifier"
+                && let Some(wrapped) = wrap_node(py, &self.inner.child_with(id))?
+            {
+                out.push(wrapped);
+            }
+        }
+        Ok(out)
+    }
+
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct BinOp {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl BinOp {
+    #[getter]
+    fn left(&self, py: Python) -> PyResult<Py<PyAny>> {
+        let node = self.inner.node();
+        let left_node = node
+            .child_by_field_name("left")
+            .ok_or_else(|| pyo3::exceptions::PyAttributeError::new_err("binop has no left"))?;
+        wrap_node_or_err(py, &self.inner.child_with(left_node))
+    }
+
+    #[getter]
+    fn right(&self, py: Python) -> PyResult<Py<PyAny>> {
+        let node = self.inner.node();
+        let right_node = node
+            .child_by_field_name("right")
+            .ok_or_else(|| pyo3::exceptions::PyAttributeError::new_err("binop has no right"))?;
+        wrap_node_or_err(py, &self.inner.child_with(right_node))
+    }
+
+    /// Operator as the literal source text — "+", "-", "*", "/", "%", etc.
+    /// Simpler than CPython's `ast.Add`/`ast.Sub`/... classes; if a rule needs
+    /// CPython-style operator classes later, build them on top of this.
+    #[getter]
+    fn op(&self) -> PyResult<String> {
+        let node = self.inner.node();
+        let op_node = node.child_by_field_name("operator").ok_or_else(|| {
+            pyo3::exceptions::PyAttributeError::new_err("binop has no operator")
+        })?;
+        Ok(op_node.kind().to_string())
+    }
+
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct List {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl List {
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct Dict {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl Dict {
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
 /// Wrap a tree-sitter node as the matching Python AST class. `None` for kinds
-/// we don't have a wrapper for (binary ops, comprehensions, comments, ...).
+/// we don't have a wrapper for (comprehensions, comments, ...).
 pub(crate) fn wrap_node(py: Python, n: &NodeRef) -> PyResult<Option<Py<PyAny>>> {
-    let obj: Py<PyAny> = match n.node().kind() {
+    let kind = n.node().kind();
+    // CPython's `ast` has no Paren node — `(expr)` is just `expr`. Tree-sitter
+    // preserves the parens as a wrapping node, so we transparently descend.
+    if kind == "parenthesized_expression"
+        && let Some(inner) = n.node().named_child(0)
+    {
+        return wrap_node(py, &n.child_with(inner));
+    }
+    let obj: Py<PyAny> = match kind {
         "module" => Py::new(py, Module { inner: n.clone() })?.into_any(),
         "call" => Py::new(py, Call { inner: n.clone() })?.into_any(),
         "identifier" => Py::new(py, Name { inner: n.clone() })?.into_any(),
         "attribute" => Py::new(py, Attribute { inner: n.clone() })?.into_any(),
+        "subscript" => Py::new(py, Subscript { inner: n.clone() })?.into_any(),
+        "conditional_expression" => Py::new(py, IfExp { inner: n.clone() })?.into_any(),
+        "boolean_operator" => Py::new(py, BoolOp { inner: n.clone() })?.into_any(),
+        "lambda" => Py::new(py, Lambda { inner: n.clone() })?.into_any(),
+        "binary_operator" => Py::new(py, BinOp { inner: n.clone() })?.into_any(),
+        "list" => Py::new(py, List { inner: n.clone() })?.into_any(),
+        "dictionary" => Py::new(py, Dict { inner: n.clone() })?.into_any(),
         "integer" | "float" | "string" | "true" | "false" | "none" => {
             Py::new(py, Constant { inner: n.clone() })?.into_any()
         }
@@ -357,13 +692,28 @@ pub(crate) fn wrap_node(py: Python, n: &NodeRef) -> PyResult<Option<Py<PyAny>>> 
 
 /// Strict variant of `wrap_node`: errors if the node isn't wrappable.
 /// Use in positions where a missing wrapper is a bug (e.g., `Call.func`).
+/// The error reports the *deepest* unwrappable kind after transparent unwraps
+/// (e.g., a parenthesized conditional reports "conditional_expression", not
+/// "parenthesized_expression").
 fn wrap_node_or_err(py: Python, n: &NodeRef) -> PyResult<Py<PyAny>> {
     wrap_node(py, n)?.ok_or_else(|| {
         pyo3::exceptions::PyRuntimeError::new_err(format!(
             "unsupported node kind: {}",
-            n.node().kind()
+            deepest_unwrappable_kind(n),
         ))
     })
+}
+
+/// Walk through transparent wrappers (parenthesized_expression) to find the
+/// kind that actually has no wrapper — what the error message should report.
+fn deepest_unwrappable_kind(n: &NodeRef) -> String {
+    let mut node = n.node();
+    while node.kind() == "parenthesized_expression"
+        && let Some(inner) = node.named_child(0)
+    {
+        node = inner;
+    }
+    node.kind().to_string()
 }
 
 /// Entry point exposed to Python: parse a Python source string into a Module.

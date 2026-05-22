@@ -18,18 +18,24 @@ def _run(*args: str, cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess:
     )
 
 
-def test_check_dir_with_demo_plugin_flags_print():
+def test_check_dir_with_demo_plugin_flags_all_demo_codes():
     result = _run("check", "demo", "--plugins", "demo")
     assert result.returncode == 1
-    assert "error[DEMO001] no print()" in result.stdout
-    assert "demo/sample.py:5:4" in result.stdout
+    # All four demo rules fire on demo/sample.py.
+    codes = {line.split(" error[")[1].split("]")[0]
+             for line in result.stdout.splitlines() if " error[" in line}
+    assert codes == {"DEMO001", "DEMO002", "DEMO003", "DEMO004"}
 
 
-def test_check_single_file_with_demo_plugin():
+def test_check_single_file_full_output():
     result = _run("check", "demo/sample.py", "--plugins", "demo")
     assert result.returncode == 1
     assert result.stdout.splitlines() == [
-        "demo/sample.py:5:4: error[DEMO001] no print()"
+        "demo/sample.py:5:4: error[DEMO001] no print()",
+        "demo/sample.py:8:6: error[DEMO002] lambda has 4 args, max 3 — use def",
+        "demo/sample.py:14:11: error[DEMO003] or-chain of 4 — prefer `in {...}`",
+        "demo/sample.py:18:11: error[DEMO004] string concat — use an f-string or .join",
+        "demo/sample.py:18:11: error[DEMO004] string concat — use an f-string or .join",
     ]
 
 

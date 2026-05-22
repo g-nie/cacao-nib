@@ -18,6 +18,13 @@ fn nib(m: &Bound<'_, PyModuleType>) -> PyResult<()> {
     ast.add_class::<parser::Call>()?;
     ast.add_class::<parser::Name>()?;
     ast.add_class::<parser::Attribute>()?;
+    ast.add_class::<parser::Subscript>()?;
+    ast.add_class::<parser::IfExp>()?;
+    ast.add_class::<parser::BoolOp>()?;
+    ast.add_class::<parser::Lambda>()?;
+    ast.add_class::<parser::BinOp>()?;
+    ast.add_class::<parser::List>()?;
+    ast.add_class::<parser::Dict>()?;
     ast.add_class::<parser::Constant>()?;
     m.add_submodule(&ast)?;
     Ok(())

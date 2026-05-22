@@ -1,0 +1,9 @@
+
+1. More AST wrappers — the parser panics on subscript, lambda, binary_operator, etc. Real files hit these constantly. Each wrapper is a few lines.
+
+   >> next batch: conditional_expression, boolean_operator
+   >> lambda, binary_operator, list, dict
+
+2. `ignore` crate swap — the moment you run nib check in a real repo it descends into .venv/ and dies. Already documented; ~30 min of work.
+3. Parse-error handling (E000) — currently silently lints broken files.
+4. Rule-author warnings — improves DX when you write more rules.

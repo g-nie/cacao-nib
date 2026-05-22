@@ -61,6 +61,13 @@ fn kinds_for_visit(ast_name: &str) -> &'static [&'static str] {
         "Call" => &["call"],
         "Name" => &["identifier"],
         "Attribute" => &["attribute"],
+        "Subscript" => &["subscript"],
+        "IfExp" => &["conditional_expression"],
+        "BoolOp" => &["boolean_operator"],
+        "Lambda" => &["lambda"],
+        "BinOp" => &["binary_operator"],
+        "List" => &["list"],
+        "Dict" => &["dictionary"],
         "Constant" => &["integer", "float", "string", "true", "false", "none"],
         _ => &[],
     }
@@ -223,7 +230,7 @@ mod tests {
 
     #[test]
     fn unknown_ast_name_returns_empty() {
-        assert!(kinds_for_visit("Subscript").is_empty());
+        assert!(kinds_for_visit("ListComp").is_empty());
         assert!(kinds_for_visit("").is_empty());
         assert!(kinds_for_visit("call").is_empty()); // case-sensitive
     }

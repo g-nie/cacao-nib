@@ -31,6 +31,8 @@ def test_attribute_chain():
     assert inner.value.id == "os"
 
 
-def test_unsupported_node_kind_raises():
-    mod = nib.parse_module("1 + 2\n")
+def test_unsupported_node_kind_skipped_in_body():
+    # list comprehension isn't wrapped yet; the lenient walk should skip it,
+    # leaving body empty rather than raising.
+    mod = nib.parse_module("[x for x in y]\n")
     assert mod.body == []
