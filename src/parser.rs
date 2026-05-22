@@ -702,6 +702,31 @@ impl Compare {
 }
 
 #[pyclass(module = "nib.ast")]
+pub(crate) struct Tuple {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl Tuple {
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
 pub(crate) struct List {
     inner: NodeRef,
 }
@@ -774,6 +799,7 @@ pub(crate) fn wrap_node(py: Python, n: &NodeRef) -> PyResult<Option<Py<PyAny>>> 
         "binary_operator" => Py::new(py, BinOp { inner: n.clone() })?.into_any(),
         "comparison_operator" => Py::new(py, Compare { inner: n.clone() })?.into_any(),
         "list" => Py::new(py, List { inner: n.clone() })?.into_any(),
+        "tuple" => Py::new(py, Tuple { inner: n.clone() })?.into_any(),
         "dictionary" => Py::new(py, Dict { inner: n.clone() })?.into_any(),
         "integer" | "float" | "string" | "true" | "false" | "none" => {
             Py::new(py, Constant { inner: n.clone() })?.into_any()

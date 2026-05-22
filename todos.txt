@@ -1,8 +1,6 @@
 
 1. More AST wrappers — the parser panics on subscript, lambda, binary_operator, etc. Real files hit these constantly. Each wrapper is a few lines.
 
-    ## Fix this: demo/__init__.py: skipped (RuntimeError: unsupported node kind: tuple)
-
     My recommended order if you wanted to chase Ruff parity
 
     1. Compare — biggest 1-wrapper-to-rules ratio. Unlocks four E/F default rules immediately.
