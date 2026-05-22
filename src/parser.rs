@@ -516,8 +516,9 @@ impl Lambda {
         let mut cursor = params.walk();
         let mut out = Vec::new();
         for child in params.named_children(&mut cursor) {
-            // Pull the identifier out of common parameter shapes; ignore
-            // anything exotic for the MVP.
+            // Pull the identifier out of each parameter shape. The `_ => None`
+            // branch drops syntactic markers like `/` (positional_separator)
+            // and `*` (keyword_separator) — they're tokens, not names.
             let id_node = match child.kind() {
                 "identifier" => Some(child),
                 "default_parameter" | "typed_parameter" | "typed_default_parameter" => {

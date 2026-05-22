@@ -42,7 +42,7 @@ class NoStringConcatenation(Rule):
 
     def visit_BinOp(self, node):
         if node.op != "+":
-            return None
+            return
         left_is_str = isinstance(node.left, ast.Constant) and isinstance(
             node.left.value, str
         )
