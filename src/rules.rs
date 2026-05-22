@@ -66,6 +66,7 @@ fn kinds_for_visit(ast_name: &str) -> &'static [&'static str] {
         "BoolOp" => &["boolean_operator"],
         "Lambda" => &["lambda"],
         "BinOp" => &["binary_operator"],
+        "Compare" => &["comparison_operator"],
         "List" => &["list"],
         "Dict" => &["dictionary"],
         "Constant" => &["integer", "float", "string", "true", "false", "none"],

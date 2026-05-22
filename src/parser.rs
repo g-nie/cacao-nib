@@ -611,6 +611,97 @@ impl BinOp {
 }
 
 #[pyclass(module = "nib.ast")]
+pub(crate) struct Compare {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl Compare {
+    /// First operand. For `a == b`, this is `a`; for `1 < x < 10`, `1`.
+    #[getter]
+    fn left(&self, py: Python) -> PyResult<Py<PyAny>> {
+        let node = self.inner.node();
+        let first = node
+            .named_child(0)
+            .ok_or_else(|| pyo3::exceptions::PyAttributeError::new_err("compare has no left"))?;
+        wrap_node_or_err(py, &self.inner.child_with(first))
+    }
+
+    /// Operator strings, in source order. For `a == b`, `["=="]`; for the
+    /// chained `1 < x < 10`, `["<", "<"]`. Two-token operators (`is not`,
+    /// `not in`) are returned as a single space-joined string.
+    #[getter]
+    fn ops(&self) -> Vec<String> {
+        let (ops, _) = self.split_ops_and_comparators();
+        ops
+    }
+
+    /// Right-hand operands, one per `ops` entry. For `a == b`, `[b]`; for
+    /// `1 < x < 10`, `[x, 10]`.
+    #[getter]
+    fn comparators(&self, py: Python) -> PyResult<Vec<Py<PyAny>>> {
+        let (_, comparator_nodes) = self.split_ops_and_comparators();
+        let mut out = Vec::with_capacity(comparator_nodes.len());
+        for child in comparator_nodes {
+            out.push(wrap_node_or_err(py, &self.inner.child_with(child))?);
+        }
+        Ok(out)
+    }
+
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+impl Compare {
+    /// Walk every child in source order, splitting operator tokens (anonymous
+    /// children like `==`, `is`, `not`) from operand expressions (named
+    /// children). Adjacent anonymous tokens are stitched into one op string
+    /// to handle `is not` / `not in`. The first named child is `left` and is
+    /// excluded from the returned comparators.
+    fn split_ops_and_comparators(&self) -> (Vec<String>, Vec<Node<'_>>) {
+        let node = self.inner.node();
+        let mut ops = Vec::new();
+        let mut comparators = Vec::new();
+        let mut pending_op = String::new();
+        let mut saw_left = false;
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.is_named() {
+                if !saw_left {
+                    saw_left = true;
+                } else {
+                    ops.push(std::mem::take(&mut pending_op));
+                    comparators.push(child);
+                }
+            } else {
+                let tok = child.kind();
+                if pending_op.is_empty() {
+                    pending_op.push_str(tok);
+                } else {
+                    pending_op.push(' ');
+                    pending_op.push_str(tok);
+                }
+            }
+        }
+        (ops, comparators)
+    }
+}
+
+#[pyclass(module = "nib.ast")]
 pub(crate) struct List {
     inner: NodeRef,
 }
@@ -681,6 +772,7 @@ pub(crate) fn wrap_node(py: Python, n: &NodeRef) -> PyResult<Option<Py<PyAny>>> 
         "boolean_operator" => Py::new(py, BoolOp { inner: n.clone() })?.into_any(),
         "lambda" => Py::new(py, Lambda { inner: n.clone() })?.into_any(),
         "binary_operator" => Py::new(py, BinOp { inner: n.clone() })?.into_any(),
+        "comparison_operator" => Py::new(py, Compare { inner: n.clone() })?.into_any(),
         "list" => Py::new(py, List { inner: n.clone() })?.into_any(),
         "dictionary" => Py::new(py, Dict { inner: n.clone() })?.into_any(),
         "integer" | "float" | "string" | "true" | "false" | "none" => {

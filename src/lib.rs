@@ -23,6 +23,7 @@ fn nib(m: &Bound<'_, PyModuleType>) -> PyResult<()> {
     ast.add_class::<parser::BoolOp>()?;
     ast.add_class::<parser::Lambda>()?;
     ast.add_class::<parser::BinOp>()?;
+    ast.add_class::<parser::Compare>()?;
     ast.add_class::<parser::List>()?;
     ast.add_class::<parser::Dict>()?;
     ast.add_class::<parser::Constant>()?;

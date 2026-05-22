@@ -51,3 +51,21 @@ class NoStringConcatenation(Rule):
         )
         if left_is_str or right_is_str:
             return [Diagnostic(node, "string concat — use an f-string or .join")]
+
+
+class UseIsForNone(Rule):
+    """E711-style: `x == None` → use `x is None`. Same for `!=` → `is not`.
+    Identity is the right comparison for the singleton None."""
+
+    code = "DEMO005"
+
+    def visit_Compare(self, node):
+        # node.ops is a list of operator strings ("==", "<", "is", ...).
+        # node.comparators is a list of right-hand expressions, one per op.
+        # For a chained compare like `a == None == b`, both pairs are checked.
+        diags = []
+        for op, right in zip(node.ops, node.comparators):
+            if op in ("==", "!=") and isinstance(right, ast.Constant) and right.value is None:
+                hint = "is" if op == "==" else "is not"
+                diags.append(Diagnostic(node, f"compare to None with `{hint}`, not `{op}`"))
+        return diags

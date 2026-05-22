@@ -21,10 +21,10 @@ def _run(*args: str, cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess:
 def test_check_dir_with_demo_plugin_flags_all_demo_codes():
     result = _run("check", "demo", "--plugins", "demo")
     assert result.returncode == 1
-    # All four demo rules fire on demo/sample.py.
+    # All five demo rules fire on demo/sample.py.
     codes = {line.split(" error[")[1].split("]")[0]
              for line in result.stdout.splitlines() if " error[" in line}
-    assert codes == {"DEMO001", "DEMO002", "DEMO003", "DEMO004"}
+    assert codes == {"DEMO001", "DEMO002", "DEMO003", "DEMO004", "DEMO005"}
 
 
 def test_check_single_file_full_output():
@@ -33,9 +33,12 @@ def test_check_single_file_full_output():
     assert result.stdout.splitlines() == [
         "demo/sample.py:5:4: error[DEMO001] no print()",
         "demo/sample.py:8:6: error[DEMO002] lambda has 4 args, max 3 — use def",
-        "demo/sample.py:14:11: error[DEMO003] or-chain of 4 — prefer `in {...}`",
-        "demo/sample.py:18:11: error[DEMO004] string concat — use an f-string or .join",
-        "demo/sample.py:18:11: error[DEMO004] string concat — use an f-string or .join",
+        "demo/sample.py:12:11: error[DEMO003] or-chain of 4 — prefer `in {...}`",
+        # DEMO004 fires twice — `"hello, " + name + "!"` is two nested BinOps,
+        # each with a string operand, so both match the rule independently.
+        "demo/sample.py:16:11: error[DEMO004] string concat — use an f-string or .join",
+        "demo/sample.py:16:11: error[DEMO004] string concat — use an f-string or .join",
+        "demo/sample.py:20:7: error[DEMO005] compare to None with `is`, not `==`",
     ]
 
 
