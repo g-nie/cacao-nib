@@ -76,15 +76,15 @@ Also include a `demo/sample.py` with some `print(...)` calls so the CLI has some
 ### 7. CLI
 
 - `nib check <path>` — recursively finds `.py` files, parses each, runs all registered rules, prints diagnostics in `path:line:col: CODE message` format.
-- `--rules module` flag (repeatable) — imports `module` purely for its side effects. The import triggers `__init_subclass__` for every `Rule` subclass defined in (or imported by) that module, populating `Rule._registry`. Built-in rules (e.g. `NoEval`) live in a module that's always imported.
+- `--plugins module` flag (repeatable) — imports `module` purely for its side effects. The import triggers `__init_subclass__` for every `Rule` subclass defined in (or imported by) that module, populating `Rule._registry`. Built-in rules (e.g. `NoEval`) live in a module that's always imported. Naming follows `mypy --plugin` / `pytest -p` precedent (singular flag name in those tools; we use plural since it's repeatable) — describes the *role* the module plays, kept separate from later rule-*selection* flags.
 - After all imports, CLI instantiates every class in `Rule._registry` (rules are nullary for the MVP) and hands the instances to Rust's `run()`.
-- Prepend cwd to `sys.path` before resolving `--rules` so a local uninstalled package (like `demo/` in this repo) is loadable from the project root without `pip install`. Installed third-party packages still resolve normally via site-packages — the cwd entry is additive, not a replacement. Matches Ruff/flake8/pytest behavior.
+- Prepend cwd to `sys.path` before resolving `--plugins` so a local uninstalled package (like `demo/` in this repo) is loadable from the project root without `pip install`. Installed third-party packages still resolve normally via site-packages — the cwd entry is additive, not a replacement. Matches Ruff/flake8/pytest behavior.
 - Verify with:
   ```
-  nib check demo/sample.py --rules demo
+  nib check demo/sample.py --plugins demo
   ```
   Both `X001` (built-in) and `DEMO001` (third-party) diagnostics should appear.
-- Defer the TOML config file.
+- Defer the TOML config file, and defer rule-selection flags (`--select CODE` / `--ignore CODE`) — those operate on rule *codes*, conceptually orthogonal to `--plugins`.
 
 ### 8. Stop.
 

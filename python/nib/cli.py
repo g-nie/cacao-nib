@@ -31,7 +31,7 @@ def main() -> int:
         help="file or directory (default: current directory, recursive)",
     )
     check.add_argument(
-        "--rules",
+        "--plugins",
         action="append",
         default=[],
         metavar="MODULE",
@@ -45,14 +45,14 @@ def main() -> int:
     # Make cwd-relative packages (like demo/) importable without install.
     sys.path.insert(0, str(Path.cwd()))
 
-    # Built-ins always loaded; --rules modules imported for their side effects
+    # Built-ins always loaded; --plugins modules imported for their side effects
     # (class definitions trigger Rule.__init_subclass__).
     importlib.import_module("nib.builtin_rules")
-    for mod_name in args.rules:
+    for mod_name in args.plugins:
         try:
             importlib.import_module(mod_name)
         except ImportError as e:
-            print(f"nib: failed to import --rules {mod_name!r}: {e}", file=sys.stderr)
+            print(f"nib: failed to import --plugins {mod_name!r}: {e}", file=sys.stderr)
             return 2
 
     rules = [cls() for cls in Rule._registry]
