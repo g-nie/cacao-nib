@@ -100,6 +100,12 @@ By the end you can run `nib check foo.py` and have a Python-authored rule, dispa
 - Add a minimal semantic model (imports table only).
 - Add the project index (two `DashMap`s, populated by a pre-pass).
 - Implement the Django signal rule as the second example.
+- **Gitignore-aware file discovery (`ignore` crate).** The MVP uses `walkdir`, which happily descends into `.venv/`, `.git/`, `__pycache__/`, `node_modules/`, build outputs, and anything else sitting in the project. Running `nib check` with no path quickly turns into "lint the whole virtualenv." Swap `walkdir` for the [`ignore`](https://docs.rs/ignore) crate (what ripgrep uses) — drop-in API, but it natively:
+  - respects `.gitignore`, `.ignore`, and `.git/info/exclude`,
+  - skips hidden dirs (`.git`, `.venv`, etc.) by default,
+  - supports parallel walking (`WalkBuilder::build_parallel`) which makes large repos noticeably faster than the current single-threaded walk.
+  This is the single biggest UX upgrade for `nib check` in a real project and lines up with what Ruff does. Pair with a `--no-respect-gitignore` flag for parity with Ruff/ripgrep escape hatches.
+- **Per-file resilience hardening.** The CLI currently catches `RuntimeError` (unsupported AST kinds), `OSError`, and `UnicodeDecodeError` per file so one bad file doesn't tank a whole run. Worth tightening later: a structured per-file error channel (instead of stderr scribbles), a `--strict` flag that turns skips into failures, and probably a final summary line (`N files checked, M skipped, K issues`).
 - **Parse-error handling.** Tree-sitter is error-tolerant — it returns a tree with `ERROR` nodes for invalid syntax instead of failing. `parse_module` should check `tree.root_node().has_error()` and refuse to lint files that don't parse cleanly (emit a single `E000` diagnostic and skip rule dispatch), matching Ruff's behavior. Otherwise rules silently lint partially-broken code.
 - **Rule-author warnings (CLI).** Currently invalid rules fail silently or with cryptic PyO3 errors. The CLI should surface these as warnings at startup, naming the offending rule + method:
   - **Unknown `visit_*` name** — e.g. `visit_Cal` (typo) registers no kinds. Warn: `RuleX.visit_Cal targets unknown AST class 'Cal'. Known: Module, Call, ...`. Validation point: `build_dispatch`.

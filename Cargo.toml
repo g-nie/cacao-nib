@@ -11,3 +11,4 @@ crate-type = ["cdylib", "rlib"]
 pyo3 = { version = "0.28.0", features = ["extension-module"] }
 tree-sitter = "0.25"
 tree-sitter-python = "0.25"
+walkdir = "2"
