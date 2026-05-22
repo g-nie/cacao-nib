@@ -31,6 +31,11 @@ fn nib(m: &Bound<'_, PyModuleType>) -> PyResult<()> {
     ast.add_class::<parser::Tuple>()?;
     ast.add_class::<parser::Set>()?;
     ast.add_class::<parser::ListComp>()?;
+    ast.add_class::<parser::DictComp>()?;
+    ast.add_class::<parser::GeneratorExp>()?;
+    ast.add_class::<parser::UnaryOp>()?;
+    ast.add_class::<parser::ConcatenatedStr>()?;
+    ast.add_class::<parser::LineContinuation>()?;
     ast.add_class::<parser::Dict>()?;
     ast.add_class::<parser::Constant>()?;
     m.add_submodule(&ast)?;

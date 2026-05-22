@@ -867,6 +867,138 @@ impl Assign {
 }
 
 #[pyclass(module = "nib.ast")]
+pub(crate) struct UnaryOp {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl UnaryOp {
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+/// Tree-sitter preserves `"a" "b"` as a `concatenated_string` node; CPython
+/// would fuse it into a single Constant at parse time. We expose it as its
+/// own span-only wrapper for now — add `.value` (joined text) when a rule
+/// needs it.
+#[pyclass(module = "nib.ast")]
+pub(crate) struct ConcatenatedStr {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl ConcatenatedStr {
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+/// `\` line-continuation token. CPython's AST has no equivalent (it's pure
+/// syntax). Tree-sitter occasionally surfaces it as a named node, so we wrap
+/// it as a no-op so strict positions don't crash.
+#[pyclass(module = "nib.ast")]
+pub(crate) struct LineContinuation {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl LineContinuation {
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct GeneratorExp {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl GeneratorExp {
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct DictComp {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl DictComp {
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
 pub(crate) struct ListComp {
     inner: NodeRef,
 }
@@ -1035,6 +1167,11 @@ pub(crate) fn wrap_node(py: Python, n: &NodeRef) -> PyResult<Option<Py<PyAny>>> 
         "tuple" => Py::new(py, Tuple { inner: n.clone() })?.into_any(),
         "set" => Py::new(py, Set { inner: n.clone() })?.into_any(),
         "list_comprehension" => Py::new(py, ListComp { inner: n.clone() })?.into_any(),
+        "dictionary_comprehension" => Py::new(py, DictComp { inner: n.clone() })?.into_any(),
+        "generator_expression" => Py::new(py, GeneratorExp { inner: n.clone() })?.into_any(),
+        "unary_operator" => Py::new(py, UnaryOp { inner: n.clone() })?.into_any(),
+        "concatenated_string" => Py::new(py, ConcatenatedStr { inner: n.clone() })?.into_any(),
+        "line_continuation" => Py::new(py, LineContinuation { inner: n.clone() })?.into_any(),
         "dictionary" => Py::new(py, Dict { inner: n.clone() })?.into_any(),
         "integer" | "float" | "string" | "true" | "false" | "none" => {
             Py::new(py, Constant { inner: n.clone() })?.into_any()

@@ -74,6 +74,10 @@ fn kinds_for_visit(ast_name: &str) -> &'static [&'static str] {
         "Tuple" => &["tuple"],
         "Set" => &["set"],
         "ListComp" => &["list_comprehension"],
+        "DictComp" => &["dictionary_comprehension"],
+        "GeneratorExp" => &["generator_expression"],
+        "UnaryOp" => &["unary_operator"],
+        "ConcatenatedStr" => &["concatenated_string"],
         "Dict" => &["dictionary"],
         "Constant" => &["integer", "float", "string", "true", "false", "none"],
         _ => &[],
@@ -237,7 +241,7 @@ mod tests {
 
     #[test]
     fn unknown_ast_name_returns_empty() {
-        assert!(kinds_for_visit("DictComp").is_empty());
+        assert!(kinds_for_visit("Yield").is_empty());
         assert!(kinds_for_visit("").is_empty());
         assert!(kinds_for_visit("call").is_empty()); // case-sensitive
     }

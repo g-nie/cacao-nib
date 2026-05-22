@@ -29,10 +29,3 @@ def test_attribute_chain():
     assert inner.attr == "path"
     assert isinstance(inner.value, ast.Name)
     assert inner.value.id == "os"
-
-
-def test_unsupported_node_kind_skipped_in_body():
-    # dict comprehension isn't wrapped yet; the lenient walk should skip it,
-    # leaving body empty rather than raising.
-    mod = nib.parse_module("{x: 1 for x in y}\n")
-    assert mod.body == []
