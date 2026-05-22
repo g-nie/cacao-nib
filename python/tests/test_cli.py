@@ -47,6 +47,13 @@ def test_builtin_rule_fires_without_extra_plugin_flag(tmp_path):
     assert "error[X001] no eval" in result.stdout
 
 
+def test_missing_path_fails_cleanly():
+    result = _run("check", "does/not/exist.py")
+    assert result.returncode == 2
+    assert "path does not exist" in result.stderr
+    assert "does/not/exist.py" in result.stderr
+
+
 def test_unknown_plugin_module_fails_cleanly():
     result = _run("check", "demo", "--plugins", "does_not_exist_xyz")
     assert result.returncode == 2

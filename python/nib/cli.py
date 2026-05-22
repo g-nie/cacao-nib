@@ -42,6 +42,10 @@ def main() -> int:
     if args.cmd != "check":
         parser.error(f"unknown command: {args.cmd}")
 
+    if not args.path.exists():
+        print(f"nib: path does not exist: {args.path}", file=sys.stderr)
+        return 2
+
     # Make cwd-relative packages (like demo/) importable without install.
     sys.path.insert(0, str(Path.cwd()))
 
