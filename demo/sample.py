@@ -33,3 +33,7 @@ class bad_class:  # DEMO007
 def setup():
     a = b = 1  # DEMO008
     return a + b
+
+
+def configure(host, port, user, password, database, timeout, retries):  # DEMO009
+    return (host, port, user, password, database, timeout, retries)

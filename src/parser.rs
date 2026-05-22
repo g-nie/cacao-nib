@@ -515,34 +515,11 @@ impl Lambda {
     /// Parameter names. Bare params (`x`), default params (`y=1`), and
     /// `*args`/`**kwargs` all contribute their identifier. Returns
     /// `list[Name]` so rules can inspect names or just count via `len()`.
+    /// Lambdas and function defs share `parameters`-field shape, so this
+    /// delegates to the same helper as `FunctionDef.args`.
     #[getter]
     fn args(&self, py: Python) -> PyResult<Vec<Py<PyAny>>> {
-        let node = self.inner.node();
-        let Some(params) = node.child_by_field_name("parameters") else {
-            return Ok(vec![]);
-        };
-        let mut cursor = params.walk();
-        let mut out = Vec::new();
-        for child in params.named_children(&mut cursor) {
-            // Pull the identifier out of each parameter shape. The `_ => None`
-            // branch drops syntactic markers like `/` (positional_separator)
-            // and `*` (keyword_separator) — they're tokens, not names.
-            let id_node = match child.kind() {
-                "identifier" => Some(child),
-                "default_parameter" | "typed_parameter" | "typed_default_parameter" => {
-                    child.child_by_field_name("name")
-                }
-                "list_splat_pattern" | "dictionary_splat_pattern" => child.named_child(0),
-                _ => None,
-            };
-            if let Some(id) = id_node
-                && id.kind() == "identifier"
-                && let Some(wrapped) = wrap_node(py, &self.inner.child_with(id))?
-            {
-                out.push(wrapped);
-            }
-        }
-        Ok(out)
+        extract_param_names(py, &self.inner)
     }
 
     #[getter]
@@ -729,6 +706,13 @@ impl FunctionDef {
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
     }
 
+    /// Parameter names as `list[Name]`. Same shape as `Lambda.args`, so rules
+    /// can do `len(node.args)` for parameter-count checks or iterate names.
+    #[getter]
+    fn args(&self, py: Python) -> PyResult<Vec<Py<PyAny>>> {
+        extract_param_names(py, &self.inner)
+    }
+
     #[getter]
     fn lineno(&self) -> usize {
         self.inner.lineno()
@@ -745,6 +729,36 @@ impl FunctionDef {
     fn end_col_offset(&self) -> usize {
         self.inner.end_col_offset()
     }
+}
+
+/// Pull identifier names out of a function-def-like node's `parameters` field
+/// (also applies to lambda's `parameters`). Bare params, defaults, `*args`,
+/// and `**kwargs` all contribute one identifier; `/` and `*` separators are
+/// tokens, not names, so they're skipped.
+fn extract_param_names(py: Python, inner: &NodeRef) -> PyResult<Vec<Py<PyAny>>> {
+    let node = inner.node();
+    let Some(params) = node.child_by_field_name("parameters") else {
+        return Ok(vec![]);
+    };
+    let mut cursor = params.walk();
+    let mut out = Vec::new();
+    for child in params.named_children(&mut cursor) {
+        let id_node = match child.kind() {
+            "identifier" => Some(child),
+            "default_parameter" | "typed_parameter" | "typed_default_parameter" => {
+                child.child_by_field_name("name")
+            }
+            "list_splat_pattern" | "dictionary_splat_pattern" => child.named_child(0),
+            _ => None,
+        };
+        if let Some(id) = id_node
+            && id.kind() == "identifier"
+            && let Some(wrapped) = wrap_node(py, &inner.child_with(id))?
+        {
+            out.push(wrapped);
+        }
+    }
+    Ok(out)
 }
 
 #[pyclass(module = "nib.ast")]

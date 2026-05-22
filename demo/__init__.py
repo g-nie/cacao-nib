@@ -80,6 +80,20 @@ class ClassShouldBePascalCase(Rule):
             return [Diagnostic(node, f"class name {node.name!r} should be PascalCase")]
 
 
+class MaxParameters(Rule):
+    code = "DEMO009"
+    MAX = 5
+
+    def visit_FunctionDef(self, node):
+        if len(node.args) > self.MAX:
+            return [
+                Diagnostic(
+                    node,
+                    f"function {node.name!r} has {len(node.args)} parameters, max {self.MAX}",
+                )
+            ]
+
+
 class NoChainedAssignment(Rule):
     """Chained `a = b = 1` makes intent (alias? separate vars?) ambiguous."""
 

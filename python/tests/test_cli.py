@@ -33,6 +33,7 @@ def test_check_dir_with_demo_plugin_flags_all_demo_codes():
         "DEMO006",
         "DEMO007",
         "DEMO008",
+        "DEMO009",
     }
 
 
@@ -51,6 +52,7 @@ def test_check_single_file_full_output():
         "demo/sample.py:25:0: error[DEMO006] function 'list' shadows a builtin",
         "demo/sample.py:29:0: error[DEMO007] class name 'bad_class' should be PascalCase",
         "demo/sample.py:34:4: error[DEMO008] chained assignment with 2 targets — split it",
+        "demo/sample.py:38:0: error[DEMO009] function 'configure' has 7 parameters, max 5",
     ]
 
 
