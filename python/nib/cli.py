@@ -1,10 +1,21 @@
 import argparse
 import importlib
+import os
 import sys
 from pathlib import Path
 
 from nib import Rule, parse_module, run
 from nib.nib import collect_py_files
+
+# Color only when stdout is a real terminal and NO_COLOR isn't set
+# (https://no-color.org). Piped/redirected output stays plain.
+_USE_COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+
+
+def _c(text: str, *codes: str) -> str:
+    if not _USE_COLOR:
+        return text
+    return f"\x1b[{';'.join(codes)}m{text}\x1b[0m"
 
 
 def main() -> int:
@@ -59,7 +70,10 @@ def main() -> int:
             print(f"{file}: skipped ({type(e).__name__}: {e})", file=sys.stderr)
             continue
         for d in diags:
-            print(f"{file}:{d.lineno}:{d.col_offset}: {d.code} {d.message}")
+            print(
+                f"{file}:{d.lineno}:{d.col_offset}: "
+                f"{_c('error', '31')}[{_c(d.code, '1', '4')}] {d.message}"
+            )
             exit_code = 1
     return exit_code
 

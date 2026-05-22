@@ -21,14 +21,16 @@ def _run(*args: str, cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess:
 def test_check_dir_with_demo_rules_flags_print():
     result = _run("check", "demo", "--rules", "demo")
     assert result.returncode == 1
-    assert "DEMO001 no print()" in result.stdout
+    assert "error[DEMO001] no print()" in result.stdout
     assert "demo/sample.py:5:4" in result.stdout
 
 
 def test_check_single_file_with_demo_rules():
     result = _run("check", "demo/sample.py", "--rules", "demo")
     assert result.returncode == 1
-    assert result.stdout.splitlines() == ["demo/sample.py:5:4: DEMO001 no print()"]
+    assert result.stdout.splitlines() == [
+        "demo/sample.py:5:4: error[DEMO001] no print()"
+    ]
 
 
 def test_clean_dir_exits_zero_with_no_output(tmp_path):
@@ -42,7 +44,7 @@ def test_builtin_rule_fires_without_extra_rules_flag(tmp_path):
     (tmp_path / "bad.py").write_text('eval("x")\n')
     result = _run("check", str(tmp_path))
     assert result.returncode == 1
-    assert "X001 no eval" in result.stdout
+    assert "error[X001] no eval" in result.stdout
 
 
 def test_unknown_rules_module_fails_cleanly():
