@@ -31,7 +31,7 @@ Each wraps a `tree_sitter::Node` + `Arc<[u8]>` source. Getters are lazy. Add one
 
 ### 3. Visitor dispatcher
 
-- Define a Python-side `Rule` base class (in `nib/__init__.py` shipped with the wheel).
+- Define a Python-side `Rule` base class (in `nib/__init__.py` shipped with the wheel). Uses `__init_subclass__` to append every subclass to a class-level `Rule._registry` at class-definition time — defining a `Rule` subclass *is* registering it; no decorator, no module-level `rules = [...]` list, no `dir()` scan.
 - At rule-registration time, introspect: `[m for m in dir(rule) if m.startswith("visit_")]` → build a `HashSet<&'static str>` of kinds the rule cares about (map `visit_Call` → tree-sitter kind `"call"`).
 - Rust walks the tree with a cursor. On each node, if its kind is in the set, wrap it and call `rule.visit_<Kind>(wrapped_node)`. Collect returned `Diagnostic`s.
 
@@ -58,10 +58,10 @@ class NoEval(Rule):
 
 A separate package — not part of `cacao-nib` — should be able to define its own rule and have `cacao-nib` load it. This is the whole point of the project, so prove it works end-to-end in the MVP.
 
-No wrapper class. The third-party package just exposes a module-level `rules` list. Create a tiny throwaway package alongside the project — `examples/nib_demo/` with its own `pyproject.toml` — that depends on `cacao-nib`:
+No wrapper class, no explicit registration list. Just subclass `Rule` and the `__init_subclass__` hook puts it on `Rule._registry`. Create `demo/` at the project root (flat layout, no build backend — not installable, loaded by path from cwd):
 
 ```python
-# examples/nib_demo/nib_demo/__init__.py
+# demo/__init__.py
 from nib import Rule, Diagnostic, ast
 
 class NoPrint(Rule):
@@ -69,19 +69,19 @@ class NoPrint(Rule):
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id == "print":
             return [Diagnostic(node, "no print()")]
-
-rules = [NoPrint()]
 ```
 
-`pip install -e examples/nib_demo` should make it loadable.
+Also include a `demo/sample.py` with some `print(...)` calls so the CLI has something to lint end-to-end.
 
 ### 7. CLI
 
-- `nib check <path>` — recursively finds `.py` files, parses each, runs registered rules, prints diagnostics in `path:line:col: CODE message` format.
-- `--rules module:attr` flag (repeatable) — imports `module`, looks up `attr`, expects an iterable of `Rule` instances, registers them. Built-in rules (e.g. `NoEval`) are always loaded.
+- `nib check <path>` — recursively finds `.py` files, parses each, runs all registered rules, prints diagnostics in `path:line:col: CODE message` format.
+- `--rules module` flag (repeatable) — imports `module` purely for its side effects. The import triggers `__init_subclass__` for every `Rule` subclass defined in (or imported by) that module, populating `Rule._registry`. Built-in rules (e.g. `NoEval`) live in a module that's always imported.
+- After all imports, CLI instantiates every class in `Rule._registry` (rules are nullary for the MVP) and hands the instances to Rust's `run()`.
+- Prepend cwd to `sys.path` before resolving `--rules` so a local uninstalled package (like `demo/` in this repo) is loadable from the project root without `pip install`. Installed third-party packages still resolve normally via site-packages — the cwd entry is additive, not a replacement. Matches Ruff/flake8/pytest behavior.
 - Verify with:
   ```
-  nib check foo.py --rules nib_demo:rules
+  nib check demo/sample.py --rules demo
   ```
   Both `X001` (built-in) and `DEMO001` (third-party) diagnostics should appear.
 - Defer the TOML config file.
