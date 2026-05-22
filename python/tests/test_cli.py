@@ -24,7 +24,16 @@ def test_check_dir_with_demo_plugin_flags_all_demo_codes():
     # All five demo rules fire on demo/sample.py.
     codes = {line.split(" error[")[1].split("]")[0]
              for line in result.stdout.splitlines() if " error[" in line}
-    assert codes == {"DEMO001", "DEMO002", "DEMO003", "DEMO004", "DEMO005"}
+    assert codes == {
+        "DEMO001",
+        "DEMO002",
+        "DEMO003",
+        "DEMO004",
+        "DEMO005",
+        "DEMO006",
+        "DEMO007",
+        "DEMO008",
+    }
 
 
 def test_check_single_file_full_output():
@@ -39,6 +48,9 @@ def test_check_single_file_full_output():
         "demo/sample.py:16:11: error[DEMO004] string concat — use an f-string or .join",
         "demo/sample.py:16:11: error[DEMO004] string concat — use an f-string or .join",
         "demo/sample.py:20:7: error[DEMO005] compare to None with `is`, not `==`",
+        "demo/sample.py:25:0: error[DEMO006] function 'list' shadows a builtin",
+        "demo/sample.py:29:0: error[DEMO007] class name 'bad_class' should be PascalCase",
+        "demo/sample.py:34:4: error[DEMO008] chained assignment with 2 targets — split it",
     ]
 
 

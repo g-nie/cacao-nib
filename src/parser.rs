@@ -293,10 +293,18 @@ impl Constant {
                 Ok(int_type.call1((txt, 0))?.unbind())
             }
             "float" => {
-                let v: f64 = txt.parse().map_err(|e: std::num::ParseFloatError| {
-                    pyo3::exceptions::PyValueError::new_err(e.to_string())
-                })?;
-                Ok(v.into_pyobject(py)?.into_any().unbind())
+                // Tree-sitter-python lumps complex literals (`0.0j`) under
+                // the `float` kind. Detect the imaginary suffix and let
+                // Python build the right type. For real floats, Python's
+                // `float(txt)` handles underscores and other formats that
+                // Rust's f64 parser rejects.
+                let builtin = if txt.ends_with('j') || txt.ends_with('J') {
+                    "complex"
+                } else {
+                    "float"
+                };
+                let ctor = py.import("builtins")?.getattr(builtin)?;
+                Ok(ctor.call1((txt,))?.unbind())
             }
             "string" => {
                 // Naive string handling: strip any leading prefix (`r`, `b`,
@@ -702,6 +710,199 @@ impl Compare {
 }
 
 #[pyclass(module = "nib.ast")]
+pub(crate) struct FunctionDef {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl FunctionDef {
+    /// The function's name as a bare string, matching CPython's
+    /// `ast.FunctionDef.name` (not a Name node).
+    #[getter]
+    fn name(&self) -> PyResult<String> {
+        let node = self.inner.node();
+        let name_node = node.child_by_field_name("name").ok_or_else(|| {
+            pyo3::exceptions::PyAttributeError::new_err("function_definition has no name")
+        })?;
+        std::str::from_utf8(&self.inner.source[name_node.byte_range()])
+            .map(str::to_string)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct ClassDef {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl ClassDef {
+    /// The class's name as a bare string, matching CPython's
+    /// `ast.ClassDef.name`.
+    #[getter]
+    fn name(&self) -> PyResult<String> {
+        let node = self.inner.node();
+        let name_node = node.child_by_field_name("name").ok_or_else(|| {
+            pyo3::exceptions::PyAttributeError::new_err("class_definition has no name")
+        })?;
+        std::str::from_utf8(&self.inner.source[name_node.byte_range()])
+            .map(str::to_string)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct Assign {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl Assign {
+    /// LHS targets. CPython collapses `a = b = 1` into one Assign with
+    /// two targets; tree-sitter parses it as right-recursive nested
+    /// `assignment` nodes, so we walk that chain and collect each `left`.
+    #[getter]
+    fn targets(&self, py: Python) -> PyResult<Vec<Py<PyAny>>> {
+        let mut out = Vec::new();
+        let mut node = self.inner.node();
+        while let Some(left) = node.child_by_field_name("left") {
+            if let Some(wrapped) = wrap_node(py, &self.inner.child_with(left))? {
+                out.push(wrapped);
+            }
+            // If the RHS is itself an assignment, this is a chain — keep
+            // pulling out its `left` as another target.
+            let Some(right) = node.child_by_field_name("right") else {
+                break;
+            };
+            if right.kind() == "assignment" {
+                node = right;
+            } else {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    /// The final RHS value. For `a = b = 1`, this is `1` (not the inner
+    /// `assignment` node).
+    #[getter]
+    fn value(&self, py: Python) -> PyResult<Py<PyAny>> {
+        let mut node = self.inner.node();
+        loop {
+            let right = node.child_by_field_name("right").ok_or_else(|| {
+                pyo3::exceptions::PyAttributeError::new_err("assignment has no value")
+            })?;
+            if right.kind() == "assignment" {
+                node = right;
+            } else {
+                return wrap_node_or_err(py, &self.inner.child_with(right));
+            }
+        }
+    }
+
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct ListComp {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl ListComp {
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
+pub(crate) struct Set {
+    inner: NodeRef,
+}
+
+#[pymethods]
+impl Set {
+    #[getter]
+    fn lineno(&self) -> usize {
+        self.inner.lineno()
+    }
+    #[getter]
+    fn col_offset(&self) -> usize {
+        self.inner.col_offset()
+    }
+    #[getter]
+    fn end_lineno(&self) -> usize {
+        self.inner.end_lineno()
+    }
+    #[getter]
+    fn end_col_offset(&self) -> usize {
+        self.inner.end_col_offset()
+    }
+}
+
+#[pyclass(module = "nib.ast")]
 pub(crate) struct Tuple {
     inner: NodeRef,
 }
@@ -798,8 +999,28 @@ pub(crate) fn wrap_node(py: Python, n: &NodeRef) -> PyResult<Option<Py<PyAny>>> 
         "lambda" => Py::new(py, Lambda { inner: n.clone() })?.into_any(),
         "binary_operator" => Py::new(py, BinOp { inner: n.clone() })?.into_any(),
         "comparison_operator" => Py::new(py, Compare { inner: n.clone() })?.into_any(),
+        "function_definition" => Py::new(py, FunctionDef { inner: n.clone() })?.into_any(),
+        "class_definition" => Py::new(py, ClassDef { inner: n.clone() })?.into_any(),
+        "assignment" => {
+            // Note: tree-sitter's `assignment` covers both `x = 1` and the
+            // annotated `x: int = 1` (CPython splits the latter into AnnAssign).
+            // We surface both as Assign; add an AnnAssign wrapper if a rule
+            // ever needs to distinguish them via the `type` field.
+            //
+            // CPython merges chained `a = b = 1` into one Assign with multiple
+            // targets. Tree-sitter parses it as nested assignment nodes; we
+            // wrap only the outermost so visit_Assign fires once per statement.
+            if let Some(parent) = n.node().parent()
+                && parent.kind() == "assignment"
+            {
+                return Ok(None);
+            }
+            Py::new(py, Assign { inner: n.clone() })?.into_any()
+        }
         "list" => Py::new(py, List { inner: n.clone() })?.into_any(),
         "tuple" => Py::new(py, Tuple { inner: n.clone() })?.into_any(),
+        "set" => Py::new(py, Set { inner: n.clone() })?.into_any(),
+        "list_comprehension" => Py::new(py, ListComp { inner: n.clone() })?.into_any(),
         "dictionary" => Py::new(py, Dict { inner: n.clone() })?.into_any(),
         "integer" | "float" | "string" | "true" | "false" | "none" => {
             Py::new(py, Constant { inner: n.clone() })?.into_any()

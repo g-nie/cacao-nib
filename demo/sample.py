@@ -20,3 +20,16 @@ def needs_value(x):
     if x == None:  # DEMO005
         return "missing"
     return x
+
+
+def list(items):  # DEMO006 — shadows the builtin `list`
+    return items
+
+
+class bad_class:  # DEMO007
+    pass
+
+
+def setup():
+    a = b = 1  # DEMO008
+    return a + b

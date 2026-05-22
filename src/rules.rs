@@ -67,8 +67,13 @@ fn kinds_for_visit(ast_name: &str) -> &'static [&'static str] {
         "Lambda" => &["lambda"],
         "BinOp" => &["binary_operator"],
         "Compare" => &["comparison_operator"],
+        "FunctionDef" => &["function_definition"],
+        "ClassDef" => &["class_definition"],
+        "Assign" => &["assignment"],
         "List" => &["list"],
         "Tuple" => &["tuple"],
+        "Set" => &["set"],
+        "ListComp" => &["list_comprehension"],
         "Dict" => &["dictionary"],
         "Constant" => &["integer", "float", "string", "true", "false", "none"],
         _ => &[],
@@ -232,7 +237,7 @@ mod tests {
 
     #[test]
     fn unknown_ast_name_returns_empty() {
-        assert!(kinds_for_visit("ListComp").is_empty());
+        assert!(kinds_for_visit("DictComp").is_empty());
         assert!(kinds_for_visit("").is_empty());
         assert!(kinds_for_visit("call").is_empty()); // case-sensitive
     }
