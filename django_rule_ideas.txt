@@ -1,0 +1,13 @@
+
+- Unimported signals:
+  a @receiver(...)-decorated function defined in a module that's never imported anywhere
+  (typically because the app's apps.py ready() doesn't import the signals module)
+
+- Check for indexes on nullable columns, use partial index instead
+
+- select_related() with no arguments
+
+- No migrations folder or missing __init__.py
+
+- Catching exceptions inside transaction.atomic; especially "except DatabaseError"
+
