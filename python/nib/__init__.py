@@ -1,6 +1,9 @@
 import ast
 
 
+__all__ = ["Diagnostic", "Rule", "ast", "parse_module", "run"]
+
+
 class Diagnostic:
     __slots__ = ("lineno", "col_offset", "end_lineno", "end_col_offset", "message", "code")
 
@@ -61,6 +64,3 @@ def run(module: ast.Module, rules: list[Rule]) -> list:
 
     walk(module)
     return results
-
-
-__all__ = ["Diagnostic", "Rule", "ast", "parse_module", "run"]
