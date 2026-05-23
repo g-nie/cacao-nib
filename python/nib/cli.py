@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+import nib.builtin_rules  # noqa: F401  -- imported to register built-in Rules
 from nib import Rule, parse_module, run
 
 # Color only when stdout is a real terminal and NO_COLOR isn't set
@@ -53,7 +54,6 @@ def main() -> int:
 
     sys.path.insert(0, str(Path.cwd()))
 
-    importlib.import_module("nib.builtin_rules")
     for mod_name in args.plugins:
         try:
             importlib.import_module(mod_name)
