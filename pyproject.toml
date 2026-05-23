@@ -19,7 +19,4 @@ packages = ["python/nib"]
 [dependency-groups]
 dev = [
     "pytest",
-    # "ruff",
-    "pre-commit",
-    # "ipython",
 ]
