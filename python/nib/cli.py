@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 from nib import Rule, parse_module, run
-from nib.nib import collect_py_files
 
 # Color only when stdout is a real terminal and NO_COLOR isn't set
 # (https://no-color.org). Piped/redirected output stays plain.
@@ -16,6 +15,12 @@ def _c(text: str, *codes: str) -> str:
     if not _USE_COLOR:
         return text
     return f"\x1b[{';'.join(codes)}m{text}\x1b[0m"
+
+
+def _collect_py_files(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path]
+    return sorted(path.rglob("*.py"))
 
 
 def main() -> int:
@@ -46,11 +51,8 @@ def main() -> int:
         print(f"nib: path does not exist: {args.path}", file=sys.stderr)
         return 2
 
-    # Make cwd-relative packages (like demo/) importable without install.
     sys.path.insert(0, str(Path.cwd()))
 
-    # Built-ins always loaded; --plugins modules imported for their side effects
-    # (class definitions trigger Rule.__init_subclass__).
     importlib.import_module("nib.builtin_rules")
     for mod_name in args.plugins:
         try:
@@ -62,15 +64,12 @@ def main() -> int:
     rules = [cls() for cls in Rule._registry]
 
     exit_code = 0
-    for file_str in collect_py_files(str(args.path)):
-        file = Path(file_str)
+    for file in _collect_py_files(args.path):
         try:
             source = file.read_text()
             mod = parse_module(source)
             diags = run(mod, rules)
-        except (OSError, UnicodeDecodeError, RuntimeError) as e:
-            # Don't let one bad file kill the whole run. Unsupported AST kinds
-            # currently surface as RuntimeError from the parser wrappers.
+        except (OSError, UnicodeDecodeError, SyntaxError) as e:
             print(f"{file}: skipped ({type(e).__name__}: {e})", file=sys.stderr)
             continue
         for d in diags:

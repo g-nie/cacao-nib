@@ -69,7 +69,7 @@ def test_visit_module_fires_once():
 
 
 def test_diagnostic_span_pulled_from_node():
-    mod = nib.parse_module("    eval('hi')\n")
+    mod = nib.parse_module("x = eval('hi')\n")
     diags = nib.run(mod, [NoEval()])
     assert len(diags) == 1
     d = diags[0]

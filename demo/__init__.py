@@ -16,10 +16,9 @@ class NoLambdaWithMoreThanThreeArgs(Rule):
     code = "DEMO002"
 
     def visit_Lambda(self, node):
-        if len(node.args) > 3:
-            return [
-                Diagnostic(node, f"lambda has {len(node.args)} args, max 3 — use def")
-            ]
+        n = len(node.args.args)
+        if n > 3:
+            return [Diagnostic(node, f"lambda has {n} args, max 3 — use def")]
 
 
 class NoOrChain(Rule):
@@ -29,7 +28,7 @@ class NoOrChain(Rule):
     code = "DEMO003"
 
     def visit_BoolOp(self, node):
-        if node.op == "or" and len(node.values) > 3:
+        if isinstance(node.op, ast.Or) and len(node.values) > 3:
             return [
                 Diagnostic(node, f"or-chain of {len(node.values)} — prefer `in {{...}}`")
             ]
@@ -41,7 +40,7 @@ class NoStringConcatenation(Rule):
     code = "DEMO004"
 
     def visit_BinOp(self, node):
-        if node.op != "+":
+        if not isinstance(node.op, ast.Add):
             return
         left_is_str = isinstance(node.left, ast.Constant) and isinstance(
             node.left.value, str
@@ -85,11 +84,12 @@ class MaxParameters(Rule):
     MAX = 5
 
     def visit_FunctionDef(self, node):
-        if len(node.args) > self.MAX:
+        n = len(node.args.args)
+        if n > self.MAX:
             return [
                 Diagnostic(
                     node,
-                    f"function {node.name!r} has {len(node.args)} parameters, max {self.MAX}",
+                    f"function {node.name!r} has {n} parameters, max {self.MAX}",
                 )
             ]
 
@@ -113,12 +113,11 @@ class UseIsForNone(Rule):
     code = "DEMO005"
 
     def visit_Compare(self, node):
-        # node.ops is a list of operator strings ("==", "<", "is", ...).
-        # node.comparators is a list of right-hand expressions, one per op.
-        # For a chained compare like `a == None == b`, both pairs are checked.
         diags = []
         for op, right in zip(node.ops, node.comparators):
-            if op in ("==", "!=") and isinstance(right, ast.Constant) and right.value is None:
-                hint = "is" if op == "==" else "is not"
-                diags.append(Diagnostic(node, f"compare to None with `{hint}`, not `{op}`"))
+            if isinstance(right, ast.Constant) and right.value is None:
+                if isinstance(op, ast.Eq):
+                    diags.append(Diagnostic(node, "compare to None with `is`, not `==`"))
+                elif isinstance(op, ast.NotEq):
+                    diags.append(Diagnostic(node, "compare to None with `is not`, not `!=`"))
         return diags
