@@ -1,13 +1,3 @@
 
-1. More AST wrappers — the parser panics on subscript, lambda, binary_operator, etc. Real files hit these constantly. Each wrapper is a few lines.
+- Rule-author warnings — improves DX when you write more rules.
 
-    - Yield, YieldFrom
-    - Import + ImportFrom + alias — needed for any plugin that reasons about imports (the most common "real" rule category — flake8-bugbear, isort, etc.).
-    - ExceptHandler for E722 (one line of rule code, very common finding).
-    - Symbol table (the "natural next milestone" bullet in MVP.md). Once you have this, F401/F811/F821/F841 are each a few lines.
-    x. Everything else as rules demand.
-
-
-2. `ignore` crate swap — the moment you run nib check in a real repo it descends into .venv/ and dies. Already documented; ~30 min of work.
-3. Parse-error handling (E000) — currently silently lints broken files.
-4. Rule-author warnings — improves DX when you write more rules.
