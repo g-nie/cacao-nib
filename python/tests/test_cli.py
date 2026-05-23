@@ -56,6 +56,24 @@ def test_check_single_file_full_output():
     ]
 
 
+def test_check_uses_pyproject_tool_nib_plugins_without_flag(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.nib]\nplugins = ["myrules"]\n'
+    )
+    (tmp_path / "myrules.py").write_text(
+        "from nib import Diagnostic, Rule\n"
+        "class NoFoo(Rule):\n"
+        '    code = "FOO"\n'
+        "    def visit_Name(self, node):\n"
+        '        if node.id == "foo":\n'
+        '            return [Diagnostic(node, "no foo")]\n'
+    )
+    (tmp_path / "bad.py").write_text("foo\n")
+    result = _run("check", "bad.py", cwd=tmp_path)
+    assert result.returncode == 1
+    assert "error[FOO] no foo" in result.stdout
+
+
 def test_clean_dir_exits_zero_with_no_output(tmp_path):
     (tmp_path / "clean.py").write_text("x = 1\n")
     result = _run("check", str(tmp_path))

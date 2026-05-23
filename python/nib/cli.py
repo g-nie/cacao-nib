@@ -2,6 +2,7 @@ import argparse
 import importlib
 import os
 import sys
+import tomllib
 from pathlib import Path
 
 import nib.builtin_rules  # noqa: F401  -- imported to register built-in Rules
@@ -24,6 +25,16 @@ def _collect_py_files(path: Path) -> list[Path]:
     return sorted(path.rglob("*.py"))
 
 
+def _config_plugins() -> list[str]:
+    """Read `[tool.nib] plugins = [...]` from cwd's pyproject.toml, if any."""
+    pyproject = Path.cwd() / "pyproject.toml"
+    if not pyproject.is_file():
+        return []
+    with pyproject.open("rb") as f:
+        data = tomllib.load(f)
+    return list(data.get("tool", {}).get("nib", {}).get("plugins", []))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="nib")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -41,7 +52,8 @@ def main() -> int:
         action="append",
         default=[],
         metavar="MODULE",
-        help="import MODULE so its Rule subclasses register (repeatable)",
+        help="also import MODULE (repeatable). Plugins listed in "
+             "`[tool.nib] plugins = [...]` in cwd's pyproject.toml are loaded too.",
     )
 
     args = parser.parse_args()
@@ -54,11 +66,11 @@ def main() -> int:
 
     sys.path.insert(0, str(Path.cwd()))
 
-    for mod_name in args.plugins:
+    for mod_name in dict.fromkeys(_config_plugins() + args.plugins):
         try:
             importlib.import_module(mod_name)
         except ImportError as e:
-            print(f"nib: failed to import --plugins {mod_name!r}: {e}", file=sys.stderr)
+            print(f"nib: failed to import plugin {mod_name!r}: {e}", file=sys.stderr)
             return 2
 
     rules = [cls() for cls in Rule._registry]
