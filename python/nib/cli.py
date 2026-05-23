@@ -1,4 +1,5 @@
 import argparse
+import ast
 import importlib
 import os
 import sys
@@ -23,6 +24,26 @@ def _collect_py_files(path: Path) -> list[Path]:
     if path.is_file():
         return [path]
     return sorted(path.rglob("*.py"))
+
+
+def _validate_rules(rules: list[Rule]) -> None:
+    """Warn (to stderr) about visit_* methods targeting unknown ast classes.
+
+    A `visit_<Name>` method is valid if `ast.<Name>` exists and subclasses
+    `ast.AST` — the same contract `ast.NodeVisitor` dispatches on.
+    """
+    for rule in rules:
+        cls = type(rule)
+        for attr in dir(cls):
+            if not attr.startswith("visit_") or not callable(getattr(cls, attr, None)):
+                continue
+            ast_name = attr.removeprefix("visit_")
+            target = getattr(ast, ast_name, None)
+            if not (isinstance(target, type) and issubclass(target, ast.AST)):
+                print(
+                    f"nib: {cls.__name__}.{attr} targets unknown ast class {ast_name!r}",
+                    file=sys.stderr,
+                )
 
 
 def _config_plugins() -> list[str]:
@@ -74,6 +95,7 @@ def main() -> int:
             return 2
 
     rules = [cls() for cls in Rule._registry]
+    _validate_rules(rules)
 
     exit_code = 0
     for file in _collect_py_files(args.path):

@@ -1,4 +1,5 @@
 import ast
+import sys
 
 
 __all__ = ["Diagnostic", "Rule", "ast", "parse_module", "run"]
@@ -43,8 +44,17 @@ def parse_module(source: str) -> ast.Module:
     return ast.parse(source)
 
 
-def run(module: ast.Module, rules: list[Rule]) -> list:
-    results: list = []
+def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
+    results: list[Diagnostic] = []
+    # (rule_class_name, method, kind) — dedupe runtime warnings per rule+method.
+    warned: set[tuple[str, str, str]] = set()
+
+    def _warn(rule_cls: str, method: str, kind: str, msg: str) -> None:
+        key = (rule_cls, method, kind)
+        if key in warned:
+            return
+        warned.add(key)
+        print(f"nib: {rule_cls}.{method} {msg}", file=sys.stderr)
 
     def walk(node):
         method = f"visit_{type(node).__name__}"
@@ -55,9 +65,24 @@ def run(module: ast.Module, rules: list[Rule]) -> list:
             out = fn(node)
             if out is None:
                 continue
-            for item in out:
-                if isinstance(item, Diagnostic):
-                    item.code = getattr(type(rule), "code", "")
+            cls_name = type(rule).__name__
+            if isinstance(out, Diagnostic):
+                _warn(cls_name, method, "single",
+                      f"returned a single Diagnostic; wrap it in a list")
+                out = [out]
+            try:
+                items = list(out)
+            except TypeError:
+                _warn(cls_name, method, "noniter",
+                      f"returned non-iterable {type(out).__name__}; expected list of Diagnostic")
+                continue
+            for item in items:
+                if not isinstance(item, Diagnostic):
+                    _warn(cls_name, method, "nondiag",
+                          f"returned list contained {type(item).__name__}; "
+                          "expected Diagnostic (dropped)")
+                    continue
+                item.code = getattr(type(rule), "code", "")
                 results.append(item)
         for child in ast.iter_child_nodes(node):
             walk(child)

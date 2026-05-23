@@ -54,10 +54,32 @@ def test_visitor_multiple_rules_distinct_codes():
     assert codes == ["X001", "X002"]
 
 
-def test_non_diagnostic_returns_pass_through():
+def test_non_diagnostic_items_are_dropped_with_warning(capsys):
     mod = nib.parse_module("eval(eval('x'))\n")
     diags = nib.run(mod, [CountNames()])
-    assert diags == ["eval", "eval"]
+    assert diags == []
+    err = capsys.readouterr().err
+    assert "CountNames.visit_Name" in err
+    assert "expected Diagnostic" in err
+    # Deduped: warning fires once per (rule, method, kind) even across many nodes.
+    assert err.count("CountNames.visit_Name") == 1
+
+
+def test_single_diagnostic_return_wrapped_with_warning(capsys):
+    class BadReturn(nib.Rule):
+        code = "BAD"
+        def visit_Name(self, node):
+            return Diagnostic(node, "missing list")
+
+    mod = nib.parse_module("a; b\n")
+    diags = nib.run(mod, [BadReturn()])
+    assert len(diags) == 2
+    assert all(d.code == "BAD" for d in diags)
+    err = capsys.readouterr().err
+    assert "BadReturn.visit_Name" in err
+    assert "single Diagnostic" in err
+
+
 
 
 def test_visit_module_fires_once():

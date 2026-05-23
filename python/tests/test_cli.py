@@ -95,6 +95,21 @@ def test_missing_path_fails_cleanly():
     assert "does/not/exist.py" in result.stderr
 
 
+def test_warns_on_visit_method_targeting_unknown_ast_class(tmp_path):
+    (tmp_path / "typoplugin.py").write_text(
+        "from nib import Diagnostic, Rule\n"
+        "class Typo(Rule):\n"
+        '    code = "T1"\n'
+        "    def visit_Cal(self, node):\n"  # typo of Call
+        '        return [Diagnostic(node, "noop")]\n'
+    )
+    (tmp_path / "clean.py").write_text("x = 1\n")
+    result = _run("check", "clean.py", "--plugins", "typoplugin", cwd=tmp_path)
+    assert result.returncode == 0
+    assert "Typo.visit_Cal" in result.stderr
+    assert "'Cal'" in result.stderr
+
+
 def test_unknown_plugin_module_fails_cleanly():
     result = _run("check", "demo", "--plugins", "does_not_exist_xyz")
     assert result.returncode == 2
