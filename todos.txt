@@ -1,16 +1,5 @@
 
-- Rule-author warnings — improves DX when you write more rules. Specifically:
-    - Unknown visit_* name (typo) — warn naming the rule + the unknown ast class.
-    - Bad return type (returning a single Diagnostic instead of a list).
-    - Non-Diagnostic items in the returned list — passes through silently today.
-
-- Switch rule-author warnings from print(..., file=sys.stderr) to
-  warnings.warn(...). It's the idiomatic Python channel for "you're using
-  the API wrong, but I'll do my best" — supports dedup, filtering, and
-  capture via warnings.catch_warnings() for free. CLI would install a
-  warnings.showwarning shim (~5 lines) to keep output clean (no
-  "__main__.py:42: UserWarning:" noise). Worth doing once nib gets
-  embedded somewhere other than the CLI (editor plugin, etc.).
+- --select / --ignore for rule-code filtering (orthogonal to --plugins).
 
 - Gitignore-aware file walk. pathlib.rglob descends into .venv/, .git/,
   __pycache__/, node_modules/, etc. Either bolt on per-extension excludes or
@@ -21,7 +10,13 @@
   file and continue (good). Worth emitting a single E000-style diagnostic
   instead of a stderr line, so it shows up in the regular output stream.
 
-- --select / --ignore for rule-code filtering (orthogonal to --plugins).
+- Switch rule-author warnings from print(..., file=sys.stderr) to
+  warnings.warn(...). It's the idiomatic Python channel for "you're using
+  the API wrong, but I'll do my best" — supports dedup, filtering, and
+  capture via warnings.catch_warnings() for free. CLI would install a
+  warnings.showwarning shim (~5 lines) to keep output clean (no
+  "__main__.py:42: UserWarning:" noise). Worth doing once nib gets
+  embedded somewhere other than the CLI (editor plugin, etc.).
 
 - --strict mode that turns per-file skips into failures.
 
