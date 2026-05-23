@@ -15,7 +15,7 @@
 - Gitignore-aware file walk. pathlib.rglob descends into .venv/, .git/,
   __pycache__/, node_modules/, etc. Either bolt on per-extension excludes or
   shell out to a gitignore-respecting walker. Single biggest UX issue on real
-  repos. Pair with --no-respect-gitignore for parity with ruff/ripgrep.
+  repos. Pair with --no-respect-gitignore for parity with ruff/ripgrep.c
 
 - Parse-error handling. ast.parse raises SyntaxError; we currently skip the
   file and continue (good). Worth emitting a single E000-style diagnostic

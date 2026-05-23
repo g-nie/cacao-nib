@@ -6,7 +6,6 @@ import sys
 import tomllib
 from pathlib import Path
 
-import nib.builtin_rules  # noqa: F401  -- imported to register built-in Rules
 from nib import Rule, parse_module, run
 
 # Color only when stdout is a real terminal and NO_COLOR isn't set

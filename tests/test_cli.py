@@ -6,10 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _run(*args: str, cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess:
+def _run(*args: str, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "nib.cli", *args],
         capture_output=True,
@@ -74,18 +74,12 @@ def test_check_uses_pyproject_tool_nib_plugins_without_flag(tmp_path):
     assert "error[FOO] no foo" in result.stdout
 
 
-def test_clean_dir_exits_zero_with_no_output(tmp_path):
-    (tmp_path / "clean.py").write_text("x = 1\n")
+def test_no_plugins_exits_clean(tmp_path):
+    # nib ships zero rules — without plugins, every file is "clean."
+    (tmp_path / "anything.py").write_text('eval("x")\n')
     result = _run("check", str(tmp_path))
     assert result.returncode == 0
     assert result.stdout == ""
-
-
-def test_builtin_rule_fires_without_extra_plugin_flag(tmp_path):
-    (tmp_path / "bad.py").write_text('eval("x")\n')
-    result = _run("check", str(tmp_path))
-    assert result.returncode == 1
-    assert "error[X001] no eval" in result.stdout
 
 
 def test_missing_path_fails_cleanly():

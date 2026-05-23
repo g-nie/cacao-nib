@@ -11,10 +11,10 @@ requires-python = ">=3.11"
 nib = "nib.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["python/nib"]
+packages = ["src/nib"]
 
 [tool.hatch.build.targets.wheel.sources]
-"python/nib" = "nib"
+"src/nib" = "nib"
 
 [dependency-groups]
 dev = [
