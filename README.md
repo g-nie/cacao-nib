@@ -18,14 +18,14 @@ python -m pip install cacao-nib
 ```sh
 nib check                # lint current directory
 nib check path/to/file.py
-nib check --plugins custom_rules
+nib check --plugins nib_rules
 ```
 
 `[tool.nib]` in `pyproject.toml` is read from the current directory:
 
 ```toml
 [tool.nib]
-plugins = ["custom_rules"]
+plugins = ["nib_rules"]
 ```
 
 ### In-repo rules (no install needed)
@@ -36,8 +36,8 @@ sitting next to your `pyproject.toml` works — typical layout:
 
 ```
 your_repo/
-  pyproject.toml          # [tool.nib] plugins = ["custom_rules"]
-  custom_rules/
+  pyproject.toml          # [tool.nib] plugins = ["nib_rules"]
+  nib_rules/
     __init__.py           # your Rule subclasses live here
   src/your_app/...
 ```
