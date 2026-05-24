@@ -10,4 +10,3 @@
 - No migrations folder or missing __init__.py
 
 - Catching exceptions inside transaction.atomic; especially "except DatabaseError"
-
