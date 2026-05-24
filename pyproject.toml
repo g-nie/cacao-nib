@@ -17,6 +17,7 @@ scripts.nib = "nib.cli:main"
 
 [dependency-groups]
 dev = [
+  "astpretty",
   "pytest",
 ]
 
