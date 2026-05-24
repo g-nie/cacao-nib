@@ -69,16 +69,18 @@ mirroring `ast.NodeVisitor`.
   somewhere other than the CLI (editor plugin, etc.).
 - Minimal semantic model — an imports table per module (mapping local names to
   their fully-qualified origin, including `import x as y` and `from a.b import c`).
-  Rules currently can't reliably answer "is this `Call` actually `django.db.transaction.atomic`?"
-  without re-implementing the walk themselves. Build it once, expose to rules.
+  Rules currently can't reliably answer "is this `Call` really
+  `some.library.target`?" without re-implementing the walk themselves. Build
+  it once, expose to rules.
 - Project-wide index + `self.project` on rules. Once per-module imports tables
   exist, aggregate them (plus top-level defs) into a project index built by a
   scan pass that runs before any rule fires. Framework injects it on every rule
   as `self.project`, so cross-file rules stay normal per-file visitors that
   just query the index when they need it — no separate `ProjectRule` base
-  class or `visit_project()` hook. Motivating example: a Django rule that
-  flags `@receiver` / `signal.connect` handlers whose module isn't
-  transitively imported by any `AppConfig.ready()` (silently dead handlers).
+  class or `visit_project()` hook. Motivating shape: rules that need to ask
+  "is this symbol referenced anywhere else?" or "is this module ever
+  imported from an entry point?" — the kind of check that fails silently
+  without whole-project visibility.
 - Autofixes. The shape of this depends on a tradeoff worth flagging early:
   stdlib `ast` discards whitespace, comments, and exact formatting, so we
   can't round-trip source through it (Fixit avoids this by building on
