@@ -58,7 +58,7 @@ jobs:
       run: |
         hyperfine --warmup 1 --runs 5 --shell=none -i \
           --export-json bench.json \
-          'uv run nib check --plugins demo.rules bench-targets/django'
+          'uv run nib check --plugins bench.rules bench-targets/django'
         jq '[{
           name: "nib check django",
           unit: "s",
