@@ -8,6 +8,11 @@ from pathlib import Path
 
 from nib import Rule, parse_module, run
 
+# Exit codes
+EXIT_OK = 0
+EXIT_DIAGNOSTICS = 1  # lint ran cleanly but found violations
+EXIT_USAGE = 2  # bad invocation / config / unloadable plugin
+
 # Color only when stdout is a real terminal and NO_COLOR isn't set
 # (https://no-color.org). Piped/redirected output stays plain.
 _USE_COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
@@ -35,7 +40,7 @@ def _validate_rules(rules: list[Rule]) -> None:
         cls = type(rule)
         if not cls.code:
             print(
-                f"nib warning: {cls.__name__} has no `code` attribute (or it's empty)."
+                f"nib warning: {cls.__name__} has no `code` attribute (or it's empty). "
                 "Diagnostics will print as 'error[]' and the rule can't be "
                 "selected/ignored individually",
                 file=sys.stderr,
@@ -100,25 +105,67 @@ def _select_rules(rule_classes, select: list[str], ignore: list[str]):
     return [c for c in rule_classes if c in selected and c not in ignored]
 
 
-def main() -> int:
+def _load_plugins(plugins_arg: list[str]) -> int:
+    """Make cwd importable, then import plugins from `[tool.nib]` config +
+    CLI flag. Returns `EXIT_OK`, or `EXIT_USAGE` if any import fails."""
+    sys.path.insert(0, str(Path.cwd()))
+    cfg = _config_nib()
+    for mod_name in dict.fromkeys(list(cfg.get("plugins", [])) + plugins_arg):
+        try:
+            importlib.import_module(mod_name)
+        except ImportError as e:
+            print(f"nib: failed to import plugin {mod_name!r}: {e}", file=sys.stderr)
+            return EXIT_USAGE
+    return EXIT_OK
+
+
+def _cmd_rules(args) -> int:
+    if (err := _load_plugins(args.plugins)) != EXIT_OK:
+        return err
+
+    by_group: dict[str | None, list] = {}
+    for cls in Rule._registry:
+        by_group.setdefault(cls.group, []).append(cls)
+
+    # Sorted groups, then "(no group)" bucket last.
+    group_order = sorted(g for g in by_group if g is not None)
+    if None in by_group:
+        group_order.append(None)
+
+    for group in group_order:
+        print(_c(group or "(no group)", "1"))
+        for cls in sorted(by_group[group], key=lambda c: (c.code or "", c.__name__)):
+            code = cls.code or "(no code)"
+            doc = (cls.__doc__ or "").strip().split("\n", 1)[0]
+            line = f"  {_c(code, '1', '4')}  {cls.__name__}"
+            if doc:
+                line += f" — {doc}"
+            print(line)
+    return EXIT_OK
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nib")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    check = sub.add_parser("check", help="lint .py files")
-    check.add_argument(
-        "path",
-        type=Path,
-        nargs="?",
-        default=Path("."),
-        help="file or directory (default: current directory, recursive)",
-    )
-    check.add_argument(
+    # Shared `--plugins` flag attached to every subcommand that loads rules.
+    plugins_parent = argparse.ArgumentParser(add_help=False)
+    plugins_parent.add_argument(
         "--plugins",
         action="append",
         default=[],
         metavar="MODULE",
         help="also import MODULE (repeatable). Plugins listed in "
         "`[tool.nib] plugins = [...]` in cwd's pyproject.toml are loaded too.",
+    )
+
+    check = sub.add_parser("check", parents=[plugins_parent], help="lint .py files")
+    check.add_argument(
+        "path",
+        type=Path,
+        nargs="?",
+        default=Path("."),
+        help="file or directory (default: current directory, recursive)",
     )
     check.add_argument(
         "--select",
@@ -151,23 +198,32 @@ def main() -> int:
         help="like --ignore, but adds to (rather than replaces) the config value.",
     )
 
+    sub.add_parser(
+        "rules",
+        parents=[plugins_parent],
+        help="list every registered rule, grouped by `group`",
+    )
+
+    return parser
+
+
+def main() -> int:
+    parser = _build_parser()
     args = parser.parse_args()
+
+    if args.cmd == "rules":
+        return _cmd_rules(args)
+
     if args.cmd != "check":
         parser.error(f"unknown command: {args.cmd}")
 
     if not args.path.exists():
         print(f"nib: path does not exist: {args.path}", file=sys.stderr)
-        return 2
-
-    sys.path.insert(0, str(Path.cwd()))
+        return EXIT_USAGE
 
     cfg = _config_nib()
-    for mod_name in dict.fromkeys(list(cfg.get("plugins", [])) + args.plugins):
-        try:
-            importlib.import_module(mod_name)
-        except ImportError as e:
-            print(f"nib: failed to import plugin {mod_name!r}: {e}", file=sys.stderr)
-            return 2
+    if (err := _load_plugins(args.plugins)) != EXIT_OK:
+        return err
 
     collisions = _check_code_group_collisions(Rule._registry)
     if collisions:
@@ -175,7 +231,7 @@ def main() -> int:
             f"nib: name used as both a code and a group: {sorted(collisions)}",
             file=sys.stderr,
         )
-        return 2
+        return EXIT_USAGE
 
     select = (
         args.select if args.select is not None else list(cfg.get("select", []))
@@ -187,9 +243,9 @@ def main() -> int:
     _validate_rules(rules)
 
     if not rules:
-        return 0  # nothing to enforce — skip the file walk entirely
+        return EXIT_OK  # nothing to enforce — skip the file walk entirely
 
-    exit_code = 0
+    exit_code = EXIT_OK
     for file in _collect_py_files(args.path):
         try:
             source = file.read_text()
@@ -203,7 +259,7 @@ def main() -> int:
                 f"{file}:{d.lineno}:{d.col_offset}: "
                 f"{_c('error', '31')}[{_c(d.code, '1', '4')}] {d.message}"
             )
-            exit_code = 1
+            exit_code = EXIT_DIAGNOSTICS
     return exit_code
 
 

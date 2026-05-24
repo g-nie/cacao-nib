@@ -76,10 +76,6 @@ select/ignore them as a set. A name can't be used as both a `code` and a
 
 ## Roadmap
 
-- `nib rules` subcommand — pretty-print every registered rule code, grouped
-  by `group`, with the rule class name and (eventually) a one-line summary
-  pulled from the class docstring. Loads plugins the same way `check` does
-  so the output reflects the user's actual config.
 - Gitignore-aware file discovery (currently `pathlib.rglob` descends into
   `.venv/`, `.git/`, `__pycache__/`, `node_modules/`, etc.). Either bolt on
   per-extension excludes or shell out to a gitignore-respecting walker. Pair

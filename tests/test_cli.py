@@ -255,6 +255,19 @@ def test_cli_select_replaces_config_select(tmp_path):
     assert _codes(result.stdout) == {"BBB001"}
 
 
+def test_rules_subcommand_lists_groups_and_codes(tmp_path):
+    _three_rule_plugin(tmp_path)
+    result = _run("rules", "--plugins", "multirule", cwd=tmp_path)
+    assert result.returncode == 0
+    lines = result.stdout.splitlines()
+    # Group headers + their rules appear in sorted order.
+    assert "AAA" in lines
+    assert "BBB" in lines
+    assert any("AAA001" in line and "A1" in line for line in lines)
+    assert any("AAA002" in line and "A2" in line for line in lines)
+    assert any("BBB001" in line and "B1" in line for line in lines)
+
+
 def test_extend_select_appends_to_config(tmp_path):
     _three_rule_plugin(tmp_path)
     (tmp_path / "pyproject.toml").write_text(
