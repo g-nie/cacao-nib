@@ -10,3 +10,12 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
 ]
+dependencies = [
+  "cacao-nib",
+]
+
+[tool.uv]
+sources.cacao-nib = { path = "../", editable = true }
+
+[tool.nib]
+plugins = [ "rules" ]

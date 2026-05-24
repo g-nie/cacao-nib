@@ -18,15 +18,32 @@ python -m pip install cacao-nib
 ```sh
 nib check                # lint current directory
 nib check path/to/file.py
-nib check --plugins my_rules_pkg
+nib check --plugins custom_rules
 ```
 
 `[tool.nib]` in `pyproject.toml` is read from the current directory:
 
 ```toml
 [tool.nib]
-plugins = ["my_rules_pkg"]
+plugins = ["custom_rules"]
 ```
+
+### In-repo rules (no install needed)
+
+The plugin doesn't have to be a published package. nib prepends the current
+directory to `sys.path` before importing plugins, so any importable module
+sitting next to your `pyproject.toml` works — typical layout:
+
+```
+your_repo/
+  pyproject.toml          # [tool.nib] plugins = ["custom_rules"]
+  custom_rules/
+    __init__.py           # your Rule subclasses live here
+  src/your_app/...
+```
+
+Then `cd your_repo && nib check` picks them up. No `pip install -e .`, no
+`[build-system]` block, no entry-point registration.
 
 ## Writing a rule
 

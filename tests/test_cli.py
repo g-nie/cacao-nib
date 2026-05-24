@@ -19,7 +19,7 @@ def _run(*args: str, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess:
 
 
 def test_check_dir_with_demo_plugin_flags_all_demo_codes():
-    result = _run("check", "demo", "--plugins", "demo")
+    result = _run("check", "demo", "--plugins", "demo.rules")
     assert result.returncode == 1
     # All five demo rules fire on demo/sample.py.
     codes = {
@@ -41,7 +41,7 @@ def test_check_dir_with_demo_plugin_flags_all_demo_codes():
 
 
 def test_check_single_file_full_output():
-    result = _run("check", "demo/sample.py", "--plugins", "demo")
+    result = _run("check", "demo/sample.py", "--plugins", "demo.rules")
     assert result.returncode == 1
     assert result.stdout.splitlines() == [
         "demo/sample.py:5:4: error[DEMO001] no print()",
