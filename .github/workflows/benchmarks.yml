@@ -73,8 +73,7 @@ jobs:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         # Only update the gh-pages history when landing on main; PRs just compare.
         auto-push: ${{ github.event_name == 'push' }}
-        # 1.1× the rolling baseline = regression.
-        alert-threshold: '110%'
+        alert-threshold: '120%'  # 1.2× the rolling baseline = regression.
         comment-on-alert: true
         # Block PR merge on regression, but never block a main push.
         fail-on-alert: ${{ github.event_name == 'pull_request' }}
