@@ -33,6 +33,13 @@ def _validate_rules(rules: list[Rule]) -> None:
     """
     for rule in rules:
         cls = type(rule)
+        if not cls.code:
+            print(
+                f"nib warning: {cls.__name__} has no `code` attribute (or it's empty)."
+                "Diagnostics will print as 'error[]' and the rule can't be "
+                "selected/ignored individually",
+                file=sys.stderr,
+            )
         for attr in dir(cls):
             if not attr.startswith("visit_") or not callable(getattr(cls, attr, None)):
                 continue
@@ -40,20 +47,57 @@ def _validate_rules(rules: list[Rule]) -> None:
             target = getattr(ast, ast_name, None)
             if not (isinstance(target, type) and issubclass(target, ast.AST)):
                 print(
-                    f"nib: {cls.__name__}.{attr} targets unknown ast "
+                    f"nib warning: {cls.__name__}.{attr} targets unknown ast "
                     f"class {ast_name!r}",
                     file=sys.stderr,
                 )
 
 
-def _config_plugins() -> list[str]:
-    """Read `[tool.nib] plugins = [...]` from cwd's pyproject.toml, if any."""
+def _config_nib() -> dict:
+    """Read the `[tool.nib]` table from cwd's pyproject.toml, if any."""
     pyproject = Path.cwd() / "pyproject.toml"
     if not pyproject.is_file():
-        return []
+        return {}
     with pyproject.open("rb") as f:
         data = tomllib.load(f)
-    return list(data.get("tool", {}).get("nib", {}).get("plugins", []))
+    return data.get("tool", {}).get("nib", {})
+
+
+def _parse_codes(s: str) -> list[str]:
+    return [p.strip() for p in s.split(",") if p.strip()]
+
+
+def _check_code_group_collisions(rule_classes) -> set[str]:
+    """Return any names used as both a `code` and a `group` across rules."""
+    codes = {c.code for c in rule_classes if c.code}
+    groups = {c.group for c in rule_classes if c.group}
+    return codes & groups
+
+
+def _select_rules(rule_classes, select: list[str], ignore: list[str]):
+    """Filter `rule_classes` by code/group tokens. Ignore wins over select.
+
+    Empty `select` means "all rules". Tokens that match neither a code nor a
+    group are silently dropped — they just don't contribute any rules.
+    """
+    by_code = {c.code: c for c in rule_classes if c.code}
+    by_group: dict[str, list] = {}
+    for c in rule_classes:
+        if c.group:
+            by_group.setdefault(c.group, []).append(c)
+
+    def resolve(tokens: list[str]) -> set:
+        out: set = set()
+        for tok in tokens:
+            if tok in by_code:
+                out.add(by_code[tok])
+            if tok in by_group:
+                out.update(by_group[tok])
+        return out
+
+    selected = resolve(select) if select else set(rule_classes)
+    ignored = resolve(ignore)
+    return [c for c in rule_classes if c in selected and c not in ignored]
 
 
 def main() -> int:
@@ -76,6 +120,36 @@ def main() -> int:
         help="also import MODULE (repeatable). Plugins listed in "
         "`[tool.nib] plugins = [...]` in cwd's pyproject.toml are loaded too.",
     )
+    check.add_argument(
+        "--select",
+        type=_parse_codes,
+        default=None,
+        metavar="CODES",
+        help="comma-separated rule codes/prefixes to run; replaces "
+        "`[tool.nib] select` from pyproject.toml.",
+    )
+    check.add_argument(
+        "--ignore",
+        type=_parse_codes,
+        default=None,
+        metavar="CODES",
+        help="comma-separated rule codes/prefixes to skip; replaces "
+        "`[tool.nib] ignore`. Ignore wins over select.",
+    )
+    check.add_argument(
+        "--extend-select",
+        type=_parse_codes,
+        default=[],
+        metavar="CODES",
+        help="like --select, but adds to (rather than replaces) the config value.",
+    )
+    check.add_argument(
+        "--extend-ignore",
+        type=_parse_codes,
+        default=[],
+        metavar="CODES",
+        help="like --ignore, but adds to (rather than replaces) the config value.",
+    )
 
     args = parser.parse_args()
     if args.cmd != "check":
@@ -87,14 +161,29 @@ def main() -> int:
 
     sys.path.insert(0, str(Path.cwd()))
 
-    for mod_name in dict.fromkeys(_config_plugins() + args.plugins):
+    cfg = _config_nib()
+    for mod_name in dict.fromkeys(list(cfg.get("plugins", [])) + args.plugins):
         try:
             importlib.import_module(mod_name)
         except ImportError as e:
             print(f"nib: failed to import plugin {mod_name!r}: {e}", file=sys.stderr)
             return 2
 
-    rules = [cls() for cls in Rule._registry]
+    collisions = _check_code_group_collisions(Rule._registry)
+    if collisions:
+        print(
+            f"nib: name used as both a code and a group: {sorted(collisions)}",
+            file=sys.stderr,
+        )
+        return 2
+
+    select = (
+        args.select if args.select is not None else list(cfg.get("select", []))
+    ) + args.extend_select
+    ignore = (
+        args.ignore if args.ignore is not None else list(cfg.get("ignore", []))
+    ) + args.extend_ignore
+    rules = [cls() for cls in _select_rules(Rule._registry, select, ignore)]
     _validate_rules(rules)
 
     exit_code = 0

@@ -30,15 +30,21 @@ class Rule:
     Defining a subclass auto-registers it on `Rule._registry` — the CLI
     instantiates everything in the registry after importing rule modules.
 
+    Optionally set `group` to opt rules into category-style selection
+    (e.g. `--select DEMO` matches every rule with `group = "DEMO"`).
+
     Example:
 
         class NoEval(Rule):
             code = "X001"
+            group = "X"
             def visit_Call(self, node):
                 if isinstance(node.func, ast.Name) and node.func.id == "eval":
                     return [Diagnostic(node, "no eval")]
     """
 
+    code: str = ""
+    group: str | None = None
     _registry: list[type["Rule"]] = []
 
     def __init_subclass__(cls, **kwargs):
@@ -60,7 +66,7 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
         if key in warned:
             return
         warned.add(key)
-        print(f"nib: {rule_cls}.{method} {msg}", file=sys.stderr)
+        print(f"nib warning: {rule_cls}.{method} {msg}", file=sys.stderr)
 
     def walk(node):
         method = f"visit_{type(node).__name__}"

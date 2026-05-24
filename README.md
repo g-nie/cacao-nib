@@ -16,9 +16,11 @@ python -m pip install cacao-nib
 ## Usage
 
 ```sh
-nib check                # lint current directory
+nib check                                  # lint current directory
 nib check path/to/file.py
 nib check --plugins nib_rules
+nib check --select X001,DJ                 # only these codes/groups
+nib check --ignore X002 --extend-ignore DJ # add to config's ignore list
 ```
 
 `[tool.nib]` in `pyproject.toml` is read from the current directory:
@@ -26,7 +28,15 @@ nib check --plugins nib_rules
 ```toml
 [tool.nib]
 plugins = ["nib_rules"]
+select  = ["X001", "DJ"]   # optional — empty = run everything
+ignore  = ["X002"]         # optional — wins over select on conflicts
 ```
+
+CLI `--select` / `--ignore` *replace* their config counterparts;
+`--extend-select` / `--extend-ignore` *add* to them. Each token is matched
+exactly against either a rule's `code` or a rule's `group` — no string-prefix
+fallback, so `--ignore X` won't accidentally take out everything starting
+with `X`. Unknown tokens silently match nothing.
 
 ### In-repo rules (no install needed)
 
@@ -52,19 +62,20 @@ from nib import Rule, Diagnostic, ast
 
 class NoEval(Rule):
     code = "X001"
+    group = "X"  # optional — lets `--select X` pick up the whole family
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id == "eval":
             return [Diagnostic(node, "no eval")]
 ```
 
 Subclassing `Rule` auto-registers it. Define `visit_<AstName>` methods
-mirroring `ast.NodeVisitor`.
+mirroring `ast.NodeVisitor`. `code` identifies the individual rule; `group`
+(optional) is a category label shared by related rules so users can
+select/ignore them as a set. A name can't be used as both a `code` and a
+`group` across loaded rules — nib refuses to start if it sees a collision.
 
 ## Roadmap
 
-- `--select` / `--ignore` to filter by rule code, with `[tool.nib]` equivalents
-  in `pyproject.toml`. CLI flags replace the config values; `--extend-select` /
-  `--extend-ignore` will add to them.
 - Gitignore-aware file discovery (currently `pathlib.rglob` descends into
   `.venv/`, `.git/`, `__pycache__/`, `node_modules/`, etc.). Either bolt on
   per-extension excludes or shell out to a gitignore-respecting walker. Pair

@@ -113,3 +113,152 @@ def test_unknown_plugin_module_fails_cleanly():
     assert result.returncode == 2
     assert "failed to import" in result.stderr
     assert "does_not_exist_xyz" in result.stderr
+
+
+def _three_rule_plugin(tmp_path):
+    """Plugin with three rules: AAA001/AAA002 in group AAA, BBB001 in group BBB."""
+    (tmp_path / "multirule.py").write_text(
+        "from nib import Diagnostic, Rule\n"
+        "class A1(Rule):\n"
+        "    code = 'AAA001'\n"
+        "    group = 'AAA'\n"
+        "    def visit_Name(self, node):\n"
+        "        if node.id == 'a': return [Diagnostic(node, 'a')]\n"
+        "class A2(Rule):\n"
+        "    code = 'AAA002'\n"
+        "    group = 'AAA'\n"
+        "    def visit_Name(self, node):\n"
+        "        if node.id == 'a': return [Diagnostic(node, 'a')]\n"
+        "class B1(Rule):\n"
+        "    code = 'BBB001'\n"
+        "    group = 'BBB'\n"
+        "    def visit_Name(self, node):\n"
+        "        if node.id == 'a': return [Diagnostic(node, 'a')]\n"
+    )
+    (tmp_path / "x.py").write_text("a\n")
+
+
+def _codes(stdout: str) -> set[str]:
+    return {
+        line.split("error[")[1].split("]")[0]
+        for line in stdout.splitlines()
+        if "error[" in line
+    }
+
+
+def test_select_filters_to_named_codes(tmp_path):
+    _three_rule_plugin(tmp_path)
+    result = _run(
+        "check", "x.py", "--plugins", "multirule", "--select", "AAA001", cwd=tmp_path
+    )
+    assert _codes(result.stdout) == {"AAA001"}
+
+
+def test_select_supports_group_match(tmp_path):
+    _three_rule_plugin(tmp_path)
+    result = _run(
+        "check", "x.py", "--plugins", "multirule", "--select", "AAA", cwd=tmp_path
+    )
+    assert _codes(result.stdout) == {"AAA001", "AAA002"}
+
+
+def test_ignore_drops_codes(tmp_path):
+    _three_rule_plugin(tmp_path)
+    result = _run(
+        "check",
+        "x.py",
+        "--plugins",
+        "multirule",
+        "--ignore",
+        "AAA001,BBB",
+        cwd=tmp_path,
+    )
+    assert _codes(result.stdout) == {"AAA002"}
+
+
+def test_unknown_token_matches_nothing(tmp_path):
+    # "ZZZ" is neither a registered code nor a group → silently no-op,
+    # which combined with --select means *nothing* is selected.
+    _three_rule_plugin(tmp_path)
+    result = _run(
+        "check", "x.py", "--plugins", "multirule", "--select", "ZZZ", cwd=tmp_path
+    )
+    assert result.returncode == 0
+    assert _codes(result.stdout) == set()
+
+
+def test_warns_on_rule_without_code(tmp_path):
+    (tmp_path / "codeless.py").write_text(
+        "from nib import Diagnostic, Rule\n"
+        "class NoCode(Rule):\n"  # no `code` attribute set
+        "    def visit_Name(self, node):\n"
+        "        return [Diagnostic(node, 'noop')]\n"
+    )
+    (tmp_path / "clean.py").write_text("pass\n")  # no Name nodes → rule won't fire
+    result = _run("check", "clean.py", "--plugins", "codeless", cwd=tmp_path)
+    assert result.returncode == 0
+    assert "NoCode has no `code` attribute" in result.stderr
+
+
+def test_code_group_collision_errors(tmp_path):
+    (tmp_path / "collide.py").write_text(
+        "from nib import Diagnostic, Rule\n"
+        "class R1(Rule):\n"
+        "    code = 'X'\n"  # collides with R2.group
+        "    def visit_Name(self, node):\n"
+        "        return [Diagnostic(node, '')]\n"
+        "class R2(Rule):\n"
+        "    code = 'X001'\n"
+        "    group = 'X'\n"  # collides with R1.code
+        "    def visit_Name(self, node):\n"
+        "        return [Diagnostic(node, '')]\n"
+    )
+    (tmp_path / "f.py").write_text("a\n")
+    result = _run("check", "f.py", "--plugins", "collide", cwd=tmp_path)
+    assert result.returncode == 2
+    assert "both a code and a group" in result.stderr
+    assert "'X'" in result.stderr
+
+
+def test_ignore_wins_over_select(tmp_path):
+    _three_rule_plugin(tmp_path)
+    result = _run(
+        "check",
+        "x.py",
+        "--plugins",
+        "multirule",
+        "--select",
+        "AAA001",
+        "--ignore",
+        "AAA001",
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0
+    assert _codes(result.stdout) == set()
+
+
+def test_config_select_used_when_no_flag(tmp_path):
+    _three_rule_plugin(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.nib]\nplugins = ["multirule"]\nselect = ["AAA001"]\n'
+    )
+    result = _run("check", "x.py", cwd=tmp_path)
+    assert _codes(result.stdout) == {"AAA001"}
+
+
+def test_cli_select_replaces_config_select(tmp_path):
+    _three_rule_plugin(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.nib]\nplugins = ["multirule"]\nselect = ["AAA001"]\n'
+    )
+    result = _run("check", "x.py", "--select", "BBB001", cwd=tmp_path)
+    assert _codes(result.stdout) == {"BBB001"}
+
+
+def test_extend_select_appends_to_config(tmp_path):
+    _three_rule_plugin(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.nib]\nplugins = ["multirule"]\nselect = ["AAA001"]\n'
+    )
+    result = _run("check", "x.py", "--extend-select", "BBB001", cwd=tmp_path)
+    assert _codes(result.stdout) == {"AAA001", "BBB001"}

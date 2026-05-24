@@ -3,6 +3,7 @@ from nib import Diagnostic, Rule, ast
 
 class NoPrint(Rule):
     code = "DEMO001"
+    group = "DEMO"
 
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id == "print":
@@ -14,6 +15,7 @@ class NoLambdaWithMoreThanThreeArgs(Rule):
     a real `def` is clearer."""
 
     code = "DEMO002"
+    group = "DEMO"
 
     def visit_Lambda(self, node):
         n = len(node.args.args)
@@ -26,6 +28,7 @@ class NoOrChain(Rule):
     a membership test (`x in {...}`) instead."""
 
     code = "DEMO003"
+    group = "DEMO"
 
     def visit_BoolOp(self, node):
         if isinstance(node.op, ast.Or) and len(node.values) > 3:
@@ -40,6 +43,7 @@ class NoStringConcatenation(Rule):
     """Flags `"a" + x` style concatenation; use f-strings or `.join`."""
 
     code = "DEMO004"
+    group = "DEMO"
 
     def visit_BinOp(self, node):
         if not isinstance(node.op, ast.Add):
@@ -65,6 +69,7 @@ class NoShadowingBuiltins(Rule):
     source of "why is this broken" bugs."""
 
     code = "DEMO006"
+    group = "DEMO"
 
     def visit_FunctionDef(self, node):
         if node.name in ["list", "dict"]:  # just a dummy subset
@@ -75,6 +80,7 @@ class ClassShouldBePascalCase(Rule):
     """PEP 8 N801 — class names should be PascalCase."""
 
     code = "DEMO007"
+    group = "DEMO"
 
     def visit_ClassDef(self, node):
         if not _is_pascal_case(node.name):
@@ -83,6 +89,7 @@ class ClassShouldBePascalCase(Rule):
 
 class MaxParameters(Rule):
     code = "DEMO009"
+    group = "DEMO"
     MAX = 5
 
     def visit_FunctionDef(self, node):
@@ -100,6 +107,7 @@ class NoChainedAssignment(Rule):
     """Chained `a = b = 1` makes intent (alias? separate vars?) ambiguous."""
 
     code = "DEMO008"
+    group = "DEMO"
 
     def visit_Assign(self, node):
         if len(node.targets) > 1:
@@ -116,6 +124,7 @@ class UseIsForNone(Rule):
     Identity is the right comparison for the singleton None."""
 
     code = "DEMO005"
+    group = "DEMO"
 
     def visit_Compare(self, node):
         diags = []
