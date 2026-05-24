@@ -186,6 +186,9 @@ def main() -> int:
     rules = [cls() for cls in _select_rules(Rule._registry, select, ignore)]
     _validate_rules(rules)
 
+    if not rules:
+        return 0  # nothing to enforce — skip the file walk entirely
+
     exit_code = 0
     for file in _collect_py_files(args.path):
         try:
