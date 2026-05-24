@@ -4,8 +4,7 @@ A pluggable framework for writing Python lint rules on top of the stdlib
 `ast` module. Ships zero builtin rules: rules live in plugin packages you write or install.
 
 Plugins are loaded explicitly via `[tool.nib] plugins = [...]` in `pyproject.toml`
-(mypy-style — no `importlib.metadata` entry-point auto-discovery), so what
-runs is exactly what you list. CLI is `nib`; a rule is a Python class with
+(mypy-style), so what runs is exactly what you list. CLI is `nib`; a rule is a Python class with
 `visit_<AstName>` methods.
 
 ## Install
