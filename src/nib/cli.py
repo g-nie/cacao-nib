@@ -40,7 +40,8 @@ def _validate_rules(rules: list[Rule]) -> None:
             target = getattr(ast, ast_name, None)
             if not (isinstance(target, type) and issubclass(target, ast.AST)):
                 print(
-                    f"nib: {cls.__name__}.{attr} targets unknown ast class {ast_name!r}",
+                    f"nib: {cls.__name__}.{attr} targets unknown ast "
+                    f"class {ast_name!r}",
                     file=sys.stderr,
                 )
 
@@ -73,7 +74,7 @@ def main() -> int:
         default=[],
         metavar="MODULE",
         help="also import MODULE (repeatable). Plugins listed in "
-             "`[tool.nib] plugins = [...]` in cwd's pyproject.toml are loaded too.",
+        "`[tool.nib] plugins = [...]` in cwd's pyproject.toml are loaded too.",
     )
 
     args = parser.parse_args()

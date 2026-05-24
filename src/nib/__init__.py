@@ -1,12 +1,18 @@
 import ast
 import sys
 
-
 __all__ = ["Diagnostic", "Rule", "ast", "parse_module", "run"]
 
 
 class Diagnostic:
-    __slots__ = ("lineno", "col_offset", "end_lineno", "end_col_offset", "message", "code")
+    __slots__ = (
+        "lineno",
+        "col_offset",
+        "end_lineno",
+        "end_col_offset",
+        "message",
+        "code",
+    )
 
     def __init__(self, node, message: str):
         self.lineno = getattr(node, "lineno", 0)
@@ -67,20 +73,33 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
                 continue
             cls_name = type(rule).__name__
             if isinstance(out, Diagnostic):
-                _warn(cls_name, method, "single",
-                      f"returned a single Diagnostic; wrap it in a list")
+                _warn(
+                    cls_name,
+                    method,
+                    "single",
+                    "returned a single Diagnostic; wrap it in a list",
+                )
                 out = [out]
             try:
                 items = list(out)
             except TypeError:
-                _warn(cls_name, method, "noniter",
-                      f"returned non-iterable {type(out).__name__}; expected list of Diagnostic")
+                _warn(
+                    cls_name,
+                    method,
+                    "noniter",
+                    f"returned non-iterable {type(out).__name__}; "
+                    "expected list of Diagnostic",
+                )
                 continue
             for item in items:
                 if not isinstance(item, Diagnostic):
-                    _warn(cls_name, method, "nondiag",
-                          f"returned list contained {type(item).__name__}; "
-                          "expected Diagnostic (dropped)")
+                    _warn(
+                        cls_name,
+                        method,
+                        "nondiag",
+                        f"returned list contained {type(item).__name__}; "
+                        "expected Diagnostic (dropped)",
+                    )
                     continue
                 item.code = getattr(type(rule), "code", "")
                 results.append(item)

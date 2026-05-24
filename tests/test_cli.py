@@ -22,8 +22,11 @@ def test_check_dir_with_demo_plugin_flags_all_demo_codes():
     result = _run("check", "demo", "--plugins", "demo")
     assert result.returncode == 1
     # All five demo rules fire on demo/sample.py.
-    codes = {line.split(" error[")[1].split("]")[0]
-             for line in result.stdout.splitlines() if " error[" in line}
+    codes = {
+        line.split(" error[")[1].split("]")[0]
+        for line in result.stdout.splitlines()
+        if " error[" in line
+    }
     assert codes == {
         "DEMO001",
         "DEMO002",
@@ -50,16 +53,17 @@ def test_check_single_file_full_output():
         "demo/sample.py:16:11: error[DEMO004] string concat — use an f-string or .join",
         "demo/sample.py:20:7: error[DEMO005] compare to None with `is`, not `==`",
         "demo/sample.py:25:0: error[DEMO006] function 'list' shadows a builtin",
-        "demo/sample.py:29:0: error[DEMO007] class name 'bad_class' should be PascalCase",
-        "demo/sample.py:34:4: error[DEMO008] chained assignment with 2 targets — split it",
-        "demo/sample.py:38:0: error[DEMO009] function 'configure' has 7 parameters, max 5",
+        "demo/sample.py:29:0: error[DEMO007] class name 'bad_class' "
+        "should be PascalCase",
+        "demo/sample.py:34:4: error[DEMO008] chained assignment with 2 targets "
+        "— split it",
+        "demo/sample.py:38:0: error[DEMO009] function 'configure' has 7 parameters, "
+        "max 5",
     ]
 
 
 def test_check_uses_pyproject_tool_nib_plugins_without_flag(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.nib]\nplugins = ["myrules"]\n'
-    )
+    (tmp_path / "pyproject.toml").write_text('[tool.nib]\nplugins = ["myrules"]\n')
     (tmp_path / "myrules.py").write_text(
         "from nib import Diagnostic, Rule\n"
         "class NoFoo(Rule):\n"

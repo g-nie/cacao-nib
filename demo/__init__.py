@@ -30,7 +30,9 @@ class NoOrChain(Rule):
     def visit_BoolOp(self, node):
         if isinstance(node.op, ast.Or) and len(node.values) > 3:
             return [
-                Diagnostic(node, f"or-chain of {len(node.values)} — prefer `in {{...}}`")
+                Diagnostic(
+                    node, f"or-chain of {len(node.values)} — prefer `in {{...}}`"
+                )
             ]
 
 
@@ -102,7 +104,10 @@ class NoChainedAssignment(Rule):
     def visit_Assign(self, node):
         if len(node.targets) > 1:
             return [
-                Diagnostic(node, f"chained assignment with {len(node.targets)} targets — split it")
+                Diagnostic(
+                    node,
+                    f"chained assignment with {len(node.targets)} targets — split it",
+                )
             ]
 
 
@@ -117,7 +122,11 @@ class UseIsForNone(Rule):
         for op, right in zip(node.ops, node.comparators):
             if isinstance(right, ast.Constant) and right.value is None:
                 if isinstance(op, ast.Eq):
-                    diags.append(Diagnostic(node, "compare to None with `is`, not `==`"))
+                    diags.append(
+                        Diagnostic(node, "compare to None with `is`, not `==`")
+                    )
                 elif isinstance(op, ast.NotEq):
-                    diags.append(Diagnostic(node, "compare to None with `is not`, not `!=`"))
+                    diags.append(
+                        Diagnostic(node, "compare to None with `is not`, not `!=`")
+                    )
         return diags

@@ -68,6 +68,7 @@ def test_non_diagnostic_items_are_dropped_with_warning(capsys):
 def test_single_diagnostic_return_wrapped_with_warning(capsys):
     class BadReturn(nib.Rule):
         code = "BAD"
+
         def visit_Name(self, node):
             return Diagnostic(node, "missing list")
 
@@ -78,8 +79,6 @@ def test_single_diagnostic_return_wrapped_with_warning(capsys):
     err = capsys.readouterr().err
     assert "BadReturn.visit_Name" in err
     assert "single Diagnostic" in err
-
-
 
 
 def test_visit_module_fires_once():

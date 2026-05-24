@@ -1,8 +1,4 @@
 
-pre-commit, black, set line-length etc.
-
-===============
-
 - --select / --ignore for rule-code filtering (orthogonal to --plugins).
 
 - Gitignore-aware file walk. pathlib.rglob descends into .venv/, .git/,
