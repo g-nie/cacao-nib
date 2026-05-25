@@ -187,17 +187,18 @@ def test_unknown_token_matches_nothing(tmp_path):
     assert _codes(result.stdout) == set()
 
 
-def test_warns_on_rule_without_code(tmp_path):
+def test_errors_on_rule_without_code(tmp_path):
     (tmp_path / "codeless.py").write_text(
         "from nib import Diagnostic, Rule\n"
         "class NoCode(Rule):\n"  # no `code` attribute set
         "    def visit_Name(self, node):\n"
         "        return [Diagnostic(node, 'noop')]\n"
     )
-    (tmp_path / "clean.py").write_text("pass\n")  # no Name nodes → rule won't fire
+    (tmp_path / "clean.py").write_text("pass\n")
     result = _run("check", "clean.py", "--plugins", "codeless", cwd=tmp_path)
-    assert result.returncode == 0
-    assert "NoCode has no `code` attribute" in result.stderr
+    assert result.returncode == 2
+    assert "without a `code` attribute" in result.stderr
+    assert "NoCode" in result.stderr
 
 
 def test_code_group_collision_errors(tmp_path):

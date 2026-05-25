@@ -1,5 +1,6 @@
 import argparse
 import ast
+import functools
 import importlib
 import os
 import sys
@@ -30,6 +31,29 @@ def _collect_py_files(path: Path) -> list[Path]:
     return sorted(path.rglob("*.py"))
 
 
+def _find_rules_missing_code(rule_classes) -> list[type]:
+    """Rule classes with empty `code` are unselectable and cannot be ignored."""
+    return [c for c in rule_classes if not c.code]
+
+
+def _validate_registry(rule_classes) -> int:
+    """Static checks on the loaded rule registry. Returns `EXIT_OK` or
+    `EXIT_USAGE`, printing the first failure to stderr."""
+    collisions = _check_code_group_collisions(rule_classes)
+    if collisions:
+        print(
+            f"nib: name used as both a code and a group: {sorted(collisions)}",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+    missing = _find_rules_missing_code(rule_classes)
+    if missing:
+        names = ", ".join(c.__name__ for c in missing)
+        print(f"nib: rule(s) without a `code` attribute: {names}", file=sys.stderr)
+        return EXIT_USAGE
+    return EXIT_OK
+
+
 def _validate_rules(rules: list[Rule]) -> None:
     """Warn (to stderr) about visit_* methods targeting unknown ast classes.
 
@@ -38,13 +62,6 @@ def _validate_rules(rules: list[Rule]) -> None:
     """
     for rule in rules:
         cls = type(rule)
-        if not cls.code:
-            print(
-                f"nib warning: {cls.__name__} has no `code` attribute (or it's empty). "
-                "Diagnostics will print as 'error[]' and the rule can't be "
-                "selected/ignored individually",
-                file=sys.stderr,
-            )
         for attr in dir(cls):
             if not attr.startswith("visit_") or not callable(getattr(cls, attr, None)):
                 continue
@@ -58,6 +75,7 @@ def _validate_rules(rules: list[Rule]) -> None:
                 )
 
 
+@functools.cache
 def _config_nib() -> dict:
     """Read the `[tool.nib]` table from cwd's pyproject.toml, if any."""
     pyproject = Path.cwd() / "pyproject.toml"
@@ -121,6 +139,8 @@ def _load_plugins(plugins_arg: list[str]) -> int:
 
 def _cmd_rules(args) -> int:
     if (err := _load_plugins(args.plugins)) != EXIT_OK:
+        return err
+    if (err := _validate_registry(Rule._registry)) != EXIT_OK:
         return err
 
     by_group: dict[str | None, list] = {}
@@ -225,13 +245,8 @@ def main() -> int:
     if (err := _load_plugins(args.plugins)) != EXIT_OK:
         return err
 
-    collisions = _check_code_group_collisions(Rule._registry)
-    if collisions:
-        print(
-            f"nib: name used as both a code and a group: {sorted(collisions)}",
-            file=sys.stderr,
-        )
-        return EXIT_USAGE
+    if (err := _validate_registry(Rule._registry)) != EXIT_OK:
+        return err
 
     select = (
         args.select if args.select is not None else list(cfg.get("select", []))
