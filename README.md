@@ -76,10 +76,6 @@ select/ignore them as a set. A name can't be used as both a `code` and a
 
 ## Roadmap
 
-- Gitignore-aware file discovery (currently `pathlib.rglob` descends into
-  `.venv/`, `.git/`, `__pycache__/`, `node_modules/`, etc.). Either bolt on
-  per-extension excludes or shell out to a gitignore-respecting walker. Pair
-  with `--no-respect-gitignore` for parity with ruff/ripgrep.
 - Suppression comments — decide the syntax later. Candidates:
   - `# noqa` / `# noqa: X001,X002` (flake8/ruff style, widely recognized)
   - `# nib: ignore[X001]` / `# nib: ignore-file` (namespaced, explicit)
