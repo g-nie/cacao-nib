@@ -269,6 +269,45 @@ def test_rules_subcommand_lists_groups_and_codes(tmp_path):
     assert any("BBB001" in line and "B1" in line for line in lines)
 
 
+def test_walk_prunes_default_excluded_dirs(tmp_path):
+    """A recursive `nib check .` should skip files inside .venv/, __pycache__/, etc."""
+    (tmp_path / "pyproject.toml").write_text('[tool.nib]\nplugins = ["multirule"]\n')
+    _three_rule_plugin(tmp_path)
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / ".venv" / "trapped.py").write_text("a\n")
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "__pycache__" / "trapped.py").write_text("a\n")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "trapped.py").write_text("a\n")
+    result = _run("check", ".", cwd=tmp_path)
+    assert result.returncode == 1
+    # x.py at the root fires; nothing from the excluded dirs should appear.
+    files = {line.split(":", 1)[0] for line in result.stdout.splitlines()}
+    assert files == {"x.py"}
+
+
+def test_explicit_path_bypasses_default_excludes(tmp_path):
+    """Default behavior: passing a file inside an excluded dir lints it anyway."""
+    (tmp_path / "pyproject.toml").write_text('[tool.nib]\nplugins = ["multirule"]\n')
+    _three_rule_plugin(tmp_path)
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / ".venv" / "explicit.py").write_text("a\n")
+    result = _run("check", ".venv/explicit.py", cwd=tmp_path)
+    assert result.returncode == 1
+    assert ".venv/explicit.py" in result.stdout
+
+
+def test_force_exclude_applies_to_explicit_paths(tmp_path):
+    """`--force-exclude` makes explicit paths honor the exclude list too."""
+    (tmp_path / "pyproject.toml").write_text('[tool.nib]\nplugins = ["multirule"]\n')
+    _three_rule_plugin(tmp_path)
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / ".venv" / "explicit.py").write_text("a\n")
+    result = _run("check", ".venv/explicit.py", "--force-exclude", cwd=tmp_path)
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
 def test_extend_select_appends_to_config(tmp_path):
     _three_rule_plugin(tmp_path)
     (tmp_path / "pyproject.toml").write_text(

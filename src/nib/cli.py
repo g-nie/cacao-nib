@@ -5,6 +5,7 @@ import importlib
 import os
 import sys
 import tomllib
+from collections.abc import Iterator
 from pathlib import Path
 
 from nib import Rule, parse_module, run
@@ -13,6 +14,36 @@ from nib import Rule, parse_module, run
 EXIT_OK = 0
 EXIT_DIAGNOSTICS = 1  # lint ran cleanly but found violations
 EXIT_USAGE = 2  # bad invocation / config / unloadable plugin
+
+# Directory names always pruned during a recursive walk — same set ruff uses
+# by default. An explicit path on the CLI bypasses this (unless --force-exclude).
+DEFAULT_EXCLUDE = frozenset(
+    {
+        ".bzr",
+        ".direnv",
+        ".eggs",
+        ".git",
+        ".hg",
+        ".ipynb_checkpoints",
+        ".mypy_cache",
+        ".nox",
+        ".pants.d",
+        ".pytest_cache",
+        ".pytype",
+        ".ruff_cache",
+        ".svn",
+        ".tox",
+        ".venv",
+        "__pycache__",
+        "__pypackages__",
+        "_build",
+        "buck-out",
+        "build",
+        "dist",
+        "node_modules",
+        "venv",
+    }
+)
 
 # Color only when stdout is a real terminal and NO_COLOR isn't set
 # (https://no-color.org). Piped/redirected output stays plain.
@@ -25,10 +56,28 @@ def _c(text: str, *codes: str) -> str:
     return f"\x1b[{';'.join(codes)}m{text}\x1b[0m"
 
 
-def _collect_py_files(path: Path) -> list[Path]:
+def _walk_py_files(root: Path) -> Iterator[Path]:
+    """Walk `root` yielding `.py` files, pruning `DEFAULT_EXCLUDE` dirs in-place."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in DEFAULT_EXCLUDE)
+        for name in sorted(filenames):
+            if name.endswith(".py"):
+                yield Path(dirpath) / name
+
+
+def _collect_py_files(path: Path, *, force_exclude: bool = False) -> list[Path]:
+    """Resolve a CLI path arg to a list of `.py` files.
+
+    Directories are walked with `DEFAULT_EXCLUDE` pruning. Explicit file paths
+    bypass that pruning by default (ruff parity) — pass `force_exclude=True`
+    to apply the excludes even to explicitly-passed paths, the mode pre-commit
+    hooks want so config excludes aren't silently ignored.
+    """
+    if force_exclude and any(part in DEFAULT_EXCLUDE for part in path.parts):
+        return []
     if path.is_file():
         return [path]
-    return sorted(path.rglob("*.py"))
+    return list(_walk_py_files(path))
 
 
 def _find_rules_missing_code(rule_classes) -> list[type]:
@@ -217,6 +266,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="CODES",
         help="like --ignore, but adds to (rather than replaces) the config value.",
     )
+    check.add_argument(
+        "--force-exclude",
+        action="store_true",
+        help="apply directory excludes even to paths passed explicitly on the "
+        "CLI. Match the mode pre-commit hooks want — without it, an explicit "
+        "path inside an excluded dir is linted anyway.",
+    )
 
     sub.add_parser(
         "rules",
@@ -261,7 +317,7 @@ def main() -> int:
         return EXIT_OK  # nothing to enforce — skip the file walk entirely
 
     exit_code = EXIT_OK
-    for file in _collect_py_files(args.path):
+    for file in _collect_py_files(args.path, force_exclude=args.force_exclude):
         try:
             source = file.read_text()
             mod = parse_module(source)
