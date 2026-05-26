@@ -2,10 +2,8 @@ import argparse
 import ast
 import functools
 import importlib
-import io
 import os
 import sys
-import tokenize
 import tomllib
 from collections.abc import Iterator
 from pathlib import Path
@@ -132,35 +130,38 @@ def _parse_line_suppressions(source: str) -> dict[int, set[str] | None]:
     "suppress only these codes". Bare `# noqa` is blanket; `# noqa:` with no
     codes is a no-op (the colon signals "I'm listing codes" — empty list
     means none). The `noqa` keyword is case-insensitive (ruff/flake8 parity);
-    rule codes themselves are matched literally. Bad/untokenizable sources
-    yield `{}`.
+    rule codes themselves are matched literally.
+
+    Uses a fast line scan rather than `tokenize` — much cheaper, but with
+    one known false-positive: a directive-shaped line *inside* a multi-line
+    string (e.g. a docstring whose own line is exactly `# noqa`) is read as
+    a real directive. Single-line string literals are unaffected (the closing
+    quote after "# noqa" trails into the parse and trips the colon guard).
+    Same trade-off ruff makes.
     """
     out: dict[int, set[str] | None] = {}
-    # Fast path: tokenizing every file is expensive. If no case variant of
-    # "noqa" appears in the source, no directive can be present — skip the
-    # tokenize entirely.
+    # Cheap early-out: if no case variant of "noqa" appears anywhere, skip the
+    # per-line scan entirely. `.lower()` runs in C — vastly cheaper than the
+    # work we'd otherwise do on every file in the project.
     if "noqa" not in source.lower():
         return out
-    try:
-        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
-            if tok.type != tokenize.COMMENT:
-                continue
-            # tok.string for a COMMENT always starts with '#'.
-            body = tok.string[1:].lstrip(" \t")
-            if len(body) < 4 or body[:4].lower() != "noqa":
-                continue
-            rest = body[4:].lstrip(" \t")
-            if not rest:
-                out[tok.start[0]] = None  # bare `# noqa` → blanket
-                continue
-            if rest[0] != ":":
-                continue  # e.g. `# noqand` — not a directive
-            codes = {c.strip() for c in rest[1:].split(",") if c.strip()}
-            if codes:
-                out[tok.start[0]] = codes
-            # else: `# noqa:` with empty list — silently ignored.
-    except tokenize.TokenError:
-        pass
+    for lineno, line in enumerate(source.splitlines(), start=1):
+        hash_pos = line.find("#")
+        if hash_pos == -1:
+            continue
+        body = line[hash_pos + 1 :].lstrip(" \t")
+        if len(body) < 4 or body[:4].lower() != "noqa":
+            continue
+        rest = body[4:].lstrip(" \t")
+        if not rest:
+            out[lineno] = None  # bare `# noqa` → blanket
+            continue
+        if rest[0] != ":":
+            continue  # e.g. `# noqand` — not a directive
+        codes = {c.strip() for c in rest[1:].split(",") if c.strip()}
+        if codes:
+            out[lineno] = codes
+        # else: `# noqa:` with empty list — silently ignored.
     return out
 
 
