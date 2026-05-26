@@ -86,18 +86,18 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
         warned.add(key)
         print(f"nib warning: {rule_cls}.{method} {msg}", file=sys.stderr)
 
-    # Build dispatch table once: ast_class -> [(rule, bound_fn, method_name), ...].
+    # Build visitors_by_node_type table once: ast_class -> [(rule, bound_fn, method_name), ...].
     # Per-node lookup becomes one dict.get plus only the relevant visitors;
     # rules with no visitor for this node type aren't iterated at all.
-    dispatch: dict[type, list[tuple[Rule, Callable, str]]] = {}
+    visitors_by_node_type: dict[type, list[tuple[Rule, Callable, str]]] = {}
     for r in rules:
         for node_type, method_name in _rule_visitors(type(r)).items():
-            dispatch.setdefault(node_type, []).append(
+            visitors_by_node_type.setdefault(node_type, []).append(
                 (r, getattr(r, method_name), method_name)
             )
 
     def walk(node):
-        handlers = dispatch.get(type(node))
+        handlers = visitors_by_node_type.get(type(node))
         if handlers is not None:
             for rule, fn, method in handlers:
                 out = fn(node)
