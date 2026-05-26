@@ -149,7 +149,9 @@ def _parse_line_suppressions(source: str) -> dict[int, set[str] | None]:
     in exchange for skipping a full `tokenize` pass on every file.
     """
     out: dict[int, set[str] | None] = {}
-    if "noqa" not in source.lower():
+    # Cheap gate: the regex search is a single C-level scan with no allocation,
+    # vs `source.lower()` which copies the whole file. Most files have no noqa.
+    if not _NOQA_RE.search(source):
         return out
     for m in _NOQA_RE.finditer(source):
         lineno = source.count("\n", 0, m.start()) + 1
