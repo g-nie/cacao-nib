@@ -149,9 +149,6 @@ The comment must sit on the same line as the diagnostic's reported position
 - Severity levels on diagnostics (`error` / `warning` / `info`) with an
   exit-code policy (e.g. `--exit-zero`, or non-zero only on errors). Lets rule
   authors signal intent instead of every diagnostic being equally fatal.
-- Parallel file processing via `multiprocessing.Pool`. Rules are already
-  per-file-independent, so this is mostly plumbing — worthwhile once rule sets
-  grow.
 - Result caching — skip files whose `(mtime, size, rule-set-hash)` is
   unchanged since the last run. More work, but the baseline ruff/mypy users
   now expect.
