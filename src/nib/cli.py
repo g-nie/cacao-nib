@@ -136,6 +136,12 @@ def _parse_line_suppressions(source: str) -> dict[int, set[str] | None]:
     yield `{}`.
     """
     out: dict[int, set[str] | None] = {}
+    # Fast path: tokenizing every file is expensive. If no case variant of
+    # "noqa" appears in the source, no directive can be present — skip the
+    # tokenize entirely. `.lower()` is implemented in C and the resulting
+    # substring scan is also C-level, so this is far cheaper than tokenizing.
+    if "noqa" not in source.lower():
+        return out
     try:
         for tok in tokenize.generate_tokens(io.StringIO(source).readline):
             if tok.type != tokenize.COMMENT:
@@ -373,13 +379,22 @@ def main() -> int:
         except (OSError, UnicodeDecodeError, SyntaxError) as e:
             print(f"{file}: skipped ({type(e).__name__}: {e})", file=sys.stderr)
             continue
-        diags = _filter_suppressed(diags, _parse_line_suppressions(source))
-        for d in diags:
-            print(
-                f"{file}:{d.lineno}:{d.col_offset}: "
-                f"{_c('error', '31')}[{_c(d.code, '1', '4')}] {d.message}"
-            )
-            exit_code = EXIT_DIAGNOSTICS
+        if diags:
+            if suppressions := _parse_line_suppressions(source):
+                diags = _filter_suppressed(diags, suppressions)
+            for d in diags:
+                print(
+                    f"{file}:{d.lineno}:{d.col_offset}: "
+                    f"{_c('error', '31')}[{_c(d.code, '1', '4')}] {d.message}"
+                )
+                exit_code = EXIT_DIAGNOSTICS
+        # diags = _filter_suppressed(diags, _parse_line_suppressions(source))
+        # for d in diags:
+        #     print(
+        #         f"{file}:{d.lineno}:{d.col_offset}: "
+        #         f"{_c('error', '31')}[{_c(d.code, '1', '4')}] {d.message}"
+        #     )
+        #     exit_code = EXIT_DIAGNOSTICS
     return exit_code
 
 
