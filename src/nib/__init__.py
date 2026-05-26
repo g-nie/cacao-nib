@@ -56,6 +56,11 @@ def parse_module(source: str) -> ast.Module:
     return ast.parse(source)
 
 
+# Per-process cache of `type(node) -> "visit_<Name>"`. The AST class set is
+# fixed and small, so this is bounded; saves a string-concat per node per file.
+_METHOD_NAME: dict[type, str] = {}
+
+
 def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
     results: list[Diagnostic] = []
     # (rule_class_name, method, kind) — dedupe runtime warnings per rule+method.
@@ -69,7 +74,11 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
         print(f"nib warning: {rule_cls}.{method} {msg}", file=sys.stderr)
 
     def walk(node):
-        method = f"visit_{type(node).__name__}"
+        node_type = type(node)
+        method = _METHOD_NAME.get(node_type)
+        if method is None:
+            method = f"visit_{node_type.__name__}"
+            _METHOD_NAME[node_type] = method
         for rule in rules:
             fn = getattr(rule, method, None)
             if fn is None:
