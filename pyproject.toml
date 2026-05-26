@@ -19,6 +19,7 @@ scripts.nib = "nib.cli:main"
 dev = [
   "astpretty",
   "pytest",
+  # "pytest-xdist",
 ]
 
 [tool.hatch]

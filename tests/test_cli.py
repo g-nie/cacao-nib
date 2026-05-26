@@ -315,3 +315,53 @@ def test_extend_select_appends_to_config(tmp_path):
     )
     result = _run("check", "x.py", "--extend-select", "BBB001", cwd=tmp_path)
     assert _codes(result.stdout) == {"AAA001", "BBB001"}
+
+
+def _noqa_plugin(tmp_path):
+    _three_rule_plugin(tmp_path)
+    (tmp_path / "pyproject.toml").write_text('[tool.nib]\nplugins = ["multirule"]\n')
+
+
+def test_bare_noqa_blankets_its_line_and_does_not_leak(tmp_path):
+    # Line 1 has bare `# noqa` (blanket) — should silence all three rules.
+    # Line 2 has no directive — should still fire all three.
+    _noqa_plugin(tmp_path)
+    (tmp_path / "x.py").write_text("a  # noqa\na\n")
+    result = _run("check", "x.py", cwd=tmp_path)
+    assert result.returncode == 1  # line 2's unsuppressed diags
+    assert all(":2:" in line for line in result.stdout.splitlines())
+    assert _codes(result.stdout) == {"AAA001", "AAA002", "BBB001"}
+
+
+def test_noqa_with_code_list_only_suppresses_listed(tmp_path):
+    _noqa_plugin(tmp_path)
+    (tmp_path / "x.py").write_text("a  # noqa: AAA001, BBB001\n")
+    result = _run("check", "x.py", cwd=tmp_path)
+    assert _codes(result.stdout) == {"AAA002"}
+
+
+def test_noqa_keyword_is_case_insensitive(tmp_path):
+    # The `noqa` keyword matches case-insensitively (ruff parity); rule codes
+    # themselves are matched literally.
+    _noqa_plugin(tmp_path)
+    (tmp_path / "x.py").write_text("a  # NoQA: AAA001\n")
+    result = _run("check", "x.py", cwd=tmp_path)
+    assert _codes(result.stdout) == {"AAA002", "BBB001"}
+
+
+def test_noqa_inside_string_does_not_suppress(tmp_path):
+    _noqa_plugin(tmp_path)
+    # The text "# noqa" sits inside a string literal, not a comment token,
+    # so tokenize correctly ignores it.
+    (tmp_path / "x.py").write_text('a = "# noqa"\na\n')
+    result = _run("check", "x.py", cwd=tmp_path)
+    assert _codes(result.stdout) == {"AAA001", "AAA002", "BBB001"}
+
+
+def test_noqa_with_empty_colon_suppresses_nothing(tmp_path):
+    # `# noqa:` with no codes is a malformed directive — not the blanket form.
+    # Only bare `# noqa` (no colon) blankets the line.
+    _noqa_plugin(tmp_path)
+    (tmp_path / "x.py").write_text("a  # noqa:\n")
+    result = _run("check", "x.py", cwd=tmp_path)
+    assert _codes(result.stdout) == {"AAA001", "AAA002", "BBB001"}

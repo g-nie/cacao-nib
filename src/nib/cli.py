@@ -2,8 +2,10 @@ import argparse
 import ast
 import functools
 import importlib
+import io
 import os
 import sys
+import tokenize
 import tomllib
 from collections.abc import Iterator
 from pathlib import Path
@@ -122,6 +124,52 @@ def _validate_rules(rules: list[Rule]) -> None:
                     f"class {ast_name!r}",
                     file=sys.stderr,
                 )
+
+
+def _parse_line_suppressions(source: str) -> dict[int, set[str] | None]:
+    """Scan `source` for `# noqa` comments. Returns `{lineno: codes}` where
+    `codes is None` means "suppress every code on this line" and a set means
+    "suppress only these codes". Bare `# noqa` is blanket; `# noqa:` with no
+    codes is a no-op (the colon signals "I'm listing codes" — empty list
+    means none). The `noqa` keyword is case-insensitive (ruff/flake8 parity);
+    rule codes themselves are matched literally. Bad/untokenizable sources
+    yield `{}`.
+    """
+    out: dict[int, set[str] | None] = {}
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type != tokenize.COMMENT:
+                continue
+            # tok.string for a COMMENT always starts with '#'.
+            body = tok.string[1:].lstrip(" \t")
+            if len(body) < 4 or body[:4].lower() != "noqa":
+                continue
+            rest = body[4:].lstrip(" \t")
+            if not rest:
+                out[tok.start[0]] = None  # bare `# noqa` → blanket
+                continue
+            if rest[0] != ":":
+                continue  # e.g. `# noqand` — not a directive
+            codes = {c.strip() for c in rest[1:].split(",") if c.strip()}
+            if codes:
+                out[tok.start[0]] = codes
+            # else: `# noqa:` with empty list — silently ignored.
+    except tokenize.TokenError:
+        pass
+    return out
+
+
+def _filter_suppressed(diags, suppressions: dict[int, set[str] | None]):
+    kept = []
+    for d in diags:
+        codes = suppressions.get(d.lineno, "miss")
+        if codes == "miss":
+            kept.append(d)
+            continue
+        if codes is None or d.code in codes:
+            continue
+        kept.append(d)
+    return kept
 
 
 @functools.cache
@@ -325,6 +373,7 @@ def main() -> int:
         except (OSError, UnicodeDecodeError, SyntaxError) as e:
             print(f"{file}: skipped ({type(e).__name__}: {e})", file=sys.stderr)
             continue
+        diags = _filter_suppressed(diags, _parse_line_suppressions(source))
         for d in diags:
             print(
                 f"{file}:{d.lineno}:{d.col_offset}: "
