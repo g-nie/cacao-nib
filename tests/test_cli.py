@@ -349,8 +349,10 @@ def test_noqa_keyword_is_case_insensitive(tmp_path):
     assert _codes(result.stdout) == {"AAA002", "BBB001"}
 
 
-def test_noqa_inside_single_line_string_does_not_suppress(tmp_path):
+def test_noqa_inside_string_does_not_suppress(tmp_path):
     _noqa_plugin(tmp_path)
+    # The text "# noqa" sits inside a string literal, not a comment token,
+    # so tokenize correctly ignores it.
     (tmp_path / "x.py").write_text('a = "# noqa"\na\n')
     result = _run("check", "x.py", cwd=tmp_path)
     assert _codes(result.stdout) == {"AAA001", "AAA002", "BBB001"}
