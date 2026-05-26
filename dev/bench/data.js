@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779829159930,
+  "lastUpdate": 1779829661140,
   "repoUrl": "https://github.com/g-nie/cacao-nib",
   "entries": {
     "Benchmark": [
@@ -689,6 +689,36 @@ window.BENCHMARK_DATA = {
             "name": "nib check django",
             "value": 6.645344097,
             "range": "0.08694617461451655",
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "terzo.giannis@gmail.com",
+            "name": "Giannis Terzopoulos",
+            "username": "g-nie"
+          },
+          "committer": {
+            "email": "terzo.giannis@gmail.com",
+            "name": "Giannis Terzopoulos",
+            "username": "g-nie"
+          },
+          "distinct": true,
+          "id": "b3c804c559275498a645ccab7fa6a3490bb9b28f",
+          "message": "wip",
+          "timestamp": "2026-05-26T23:06:33+02:00",
+          "tree_id": "b5072ff6238200276fe4a5f76a4dc039f53228ed",
+          "url": "https://github.com/g-nie/cacao-nib/commit/b3c804c559275498a645ccab7fa6a3490bb9b28f"
+        },
+        "date": 1779829660315,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "nib check django",
+            "value": 6.31479785,
+            "range": "0.04230944001536503",
             "unit": "s"
           }
         ]
