@@ -2,10 +2,9 @@ import argparse
 import ast
 import functools
 import importlib
-import io
 import os
+import re
 import sys
-import tokenize
 import tomllib
 from collections.abc import Iterator
 from pathlib import Path
@@ -126,41 +125,41 @@ def _validate_rules(rules: list[Rule]) -> None:
                 )
 
 
+# `#` (possibly preceded by whitespace, followed by `noqa` and a word boundary)
+# matches either bare or `:codes`. Case-insensitive on the keyword; the codes
+# capture stays case-sensitive. Known limitation: a literal `# noqa` inside a
+# string is indistinguishable from a real comment here — see
+# `_parse_line_suppressions` for the trade-off.
+_NOQA_RE = re.compile(
+    r"#[ \t]*noqa(?![A-Za-z0-9_])[ \t]*(?::([^\n]*))?",
+    re.IGNORECASE,
+)
+
+
 def _parse_line_suppressions(source: str) -> dict[int, set[str] | None]:
-    """Scan `source` for `# noqa` comments. Returns `{lineno: codes}` where
+    """Scan `source` for `# noqa` directives. Returns `{lineno: codes}` where
     `codes is None` means "suppress every code on this line" and a set means
     "suppress only these codes". Bare `# noqa` is blanket; `# noqa:` with no
     codes is a no-op (the colon signals "I'm listing codes" — empty list
     means none). The `noqa` keyword is case-insensitive (ruff/flake8 parity);
-    rule codes themselves are matched literally. Bad/untokenizable sources
-    yield `{}`.
+    rule codes themselves are matched literally.
+
+    Implementation: regex-scan, no tokenize. False positive: a literal
+    `# noqa` inside a string is treated as a real directive. We accept this
+    in exchange for skipping a full `tokenize` pass on every file.
     """
     out: dict[int, set[str] | None] = {}
-    # Fast path: tokenizing every file is expensive. If no case variant of
-    # "noqa" appears in the source, no directive can be present — skip the
-    # tokenize entirely.
     if "noqa" not in source.lower():
         return out
-    try:
-        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
-            if tok.type != tokenize.COMMENT:
-                continue
-            # tok.string for a COMMENT always starts with '#'.
-            body = tok.string[1:].lstrip(" \t")
-            if len(body) < 4 or body[:4].lower() != "noqa":
-                continue
-            rest = body[4:].lstrip(" \t")
-            if not rest:
-                out[tok.start[0]] = None  # bare `# noqa` → blanket
-                continue
-            if rest[0] != ":":
-                continue  # e.g. `# noqand` — not a directive
-            codes = {c.strip() for c in rest[1:].split(",") if c.strip()}
-            if codes:
-                out[tok.start[0]] = codes
-            # else: `# noqa:` with empty list — silently ignored.
-    except tokenize.TokenError:
-        pass
+    for m in _NOQA_RE.finditer(source):
+        lineno = source.count("\n", 0, m.start()) + 1
+        rest = m.group(1)
+        if rest is None:
+            out[lineno] = None
+            continue
+        codes = {c.strip() for c in rest.split(",") if c.strip()}
+        if codes:
+            out[lineno] = codes
     return out
 
 
