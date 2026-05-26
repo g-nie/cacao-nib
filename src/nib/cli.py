@@ -138,8 +138,7 @@ def _parse_line_suppressions(source: str) -> dict[int, set[str] | None]:
     out: dict[int, set[str] | None] = {}
     # Fast path: tokenizing every file is expensive. If no case variant of
     # "noqa" appears in the source, no directive can be present — skip the
-    # tokenize entirely. `.lower()` is implemented in C and the resulting
-    # substring scan is also C-level, so this is far cheaper than tokenizing.
+    # tokenize entirely.
     if "noqa" not in source.lower():
         return out
     try:
@@ -388,13 +387,6 @@ def main() -> int:
                     f"{_c('error', '31')}[{_c(d.code, '1', '4')}] {d.message}"
                 )
                 exit_code = EXIT_DIAGNOSTICS
-        # diags = _filter_suppressed(diags, _parse_line_suppressions(source))
-        # for d in diags:
-        #     print(
-        #         f"{file}:{d.lineno}:{d.col_offset}: "
-        #         f"{_c('error', '31')}[{_c(d.code, '1', '4')}] {d.message}"
-        #     )
-        #     exit_code = EXIT_DIAGNOSTICS
     return exit_code
 
 
