@@ -1,5 +1,6 @@
 import ast
 import sys
+from collections.abc import Callable
 
 __all__ = ["Diagnostic", "Rule", "ast", "parse_module", "run"]
 
@@ -56,6 +57,23 @@ def parse_module(source: str) -> ast.Module:
     return ast.parse(source)
 
 
+def _rule_visitors(cls: type) -> dict[type, str]:
+    """Discover `visit_<AstName>` methods on a Rule subclass, returning
+    `{ast_class: method_name}`. Cached on the class itself."""
+    cached = cls.__dict__.get("_nib_visitors")
+    if cached is not None:
+        return cached
+    visitors: dict[type, str] = {}
+    for attr in dir(cls):
+        if not attr.startswith("visit_") or not callable(getattr(cls, attr, None)):
+            continue
+        target = getattr(ast, attr.removeprefix("visit_"), None)
+        if isinstance(target, type) and issubclass(target, ast.AST):
+            visitors[target] = attr
+    cls._nib_visitors = visitors
+    return visitors
+
+
 def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
     results: list[Diagnostic] = []
     # (rule_class_name, method, kind) — dedupe runtime warnings per rule+method.
@@ -68,47 +86,56 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
         warned.add(key)
         print(f"nib warning: {rule_cls}.{method} {msg}", file=sys.stderr)
 
+    # Build dispatch table once: ast_class -> [(rule, bound_fn, method_name), ...].
+    # Per-node lookup becomes one dict.get plus only the relevant visitors;
+    # rules with no visitor for this node type aren't iterated at all.
+    dispatch: dict[type, list[tuple[Rule, Callable, str]]] = {}
+    for r in rules:
+        for node_type, method_name in _rule_visitors(type(r)).items():
+            dispatch.setdefault(node_type, []).append(
+                (r, getattr(r, method_name), method_name)
+            )
+
     def walk(node):
-        method = f"visit_{type(node).__name__}"
-        for rule in rules:
-            fn = getattr(rule, method, None)
-            if fn is None:
-                continue
-            out = fn(node)
-            if out is None:
-                continue
-            cls_name = type(rule).__name__
-            if isinstance(out, Diagnostic):
-                _warn(
-                    cls_name,
-                    method,
-                    "single",
-                    "returned a single Diagnostic; wrap it in a list",
-                )
-                out = [out]
-            try:
-                items = list(out)
-            except TypeError:
-                _warn(
-                    cls_name,
-                    method,
-                    "noniter",
-                    f"returned non-iterable {type(out).__name__}; "
-                    "expected list of Diagnostic",
-                )
-                continue
-            for item in items:
-                if not isinstance(item, Diagnostic):
+        handlers = dispatch.get(type(node))
+        if handlers is not None:
+            for rule, fn, method in handlers:
+                out = fn(node)
+                if out is None:
+                    continue
+                cls_name = type(rule).__name__
+                if isinstance(out, Diagnostic):
                     _warn(
                         cls_name,
                         method,
-                        "nondiag",
-                        f"returned list contained {type(item).__name__}; "
-                        "expected Diagnostic (dropped)",
+                        "single",
+                        "returned a single Diagnostic; wrap it in a list",
+                    )
+                    out = [out]
+                try:
+                    items = list(out)
+                except TypeError:
+                    _warn(
+                        cls_name,
+                        method,
+                        "noniter",
+                        f"returned non-iterable {type(out).__name__}; "
+                        "expected list of Diagnostic",
                     )
                     continue
-                item.code = getattr(type(rule), "code", "")
-                results.append(item)
+                rule_code = getattr(type(rule), "code", "")
+                for item in items:
+                    if not isinstance(item, Diagnostic):
+                        _warn(
+                            cls_name,
+                            method,
+                            "nondiag",
+                            f"returned list contained {type(item).__name__}; "
+                            "expected Diagnostic (dropped)",
+                        )
+                        continue
+                    item.code = rule_code
+                    results.append(item)
         for child in ast.iter_child_nodes(node):
             walk(child)
 
