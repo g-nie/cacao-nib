@@ -139,12 +139,13 @@ def _three_rule_plugin(tmp_path):
     (tmp_path / "x.py").write_text("a\n")
 
 
+def _error_lines(stdout: str) -> list[str]:
+    """Diagnostic lines only — drops the trailing `Found N issues.` summary."""
+    return [line for line in stdout.splitlines() if "error[" in line]
+
+
 def _codes(stdout: str) -> set[str]:
-    return {
-        line.split("error[")[1].split("]")[0]
-        for line in stdout.splitlines()
-        if "error[" in line
-    }
+    return {line.split("error[")[1].split("]")[0] for line in _error_lines(stdout)}
 
 
 def test_select_filters_to_named_codes(tmp_path):
@@ -283,7 +284,7 @@ def test_walk_prunes_default_excluded_dirs(tmp_path):
     result = _run("check", ".", cwd=tmp_path)
     assert result.returncode == 1
     # x.py at the root fires; nothing from the excluded dirs should appear.
-    files = {line.split(":", 1)[0] for line in result.stdout.splitlines()}
+    files = {line.split(":", 1)[0] for line in _error_lines(result.stdout)}
     assert files == {"x.py"}
 
 
@@ -306,7 +307,7 @@ def test_force_exclude_applies_to_explicit_paths(tmp_path):
     (tmp_path / ".venv" / "explicit.py").write_text("a\n")
     result = _run("check", ".venv/explicit.py", "--force-exclude", cwd=tmp_path)
     assert result.returncode == 0
-    assert result.stdout == ""
+    assert "error[" not in result.stdout
 
 
 def test_extend_select_appends_to_config(tmp_path):
@@ -330,7 +331,7 @@ def test_bare_noqa_blankets_its_line_and_does_not_leak(tmp_path):
     (tmp_path / "x.py").write_text("a  # noqa\na\n")
     result = _run("check", "x.py", cwd=tmp_path)
     assert result.returncode == 1  # line 2's unsuppressed diags
-    assert all(":2:" in line for line in result.stdout.splitlines())
+    assert all(":2:" in line for line in _error_lines(result.stdout))
     assert _codes(result.stdout) == {"AAA001", "AAA002", "BBB001"}
 
 
@@ -360,7 +361,7 @@ def test_noqa_inside_string_is_a_known_false_positive(tmp_path):
     result = _run("check", "x.py", cwd=tmp_path)
     # Line 1's diags get suppressed by the in-string false positive; line 2
     # still fires all three rules.
-    assert all(":2:" in line for line in result.stdout.splitlines())
+    assert all(":2:" in line for line in _error_lines(result.stdout))
     assert _codes(result.stdout) == {"AAA001", "AAA002", "BBB001"}
 
 
