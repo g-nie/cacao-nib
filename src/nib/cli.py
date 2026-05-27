@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import tomllib
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -105,7 +106,7 @@ def _validate_registry(rule_classes) -> int:
 
 
 def _validate_rules(rules: list[Rule]) -> None:
-    """Warn (to stderr) about visit_* methods targeting unknown ast classes.
+    """Warn about visit_* methods targeting unknown ast classes.
 
     A `visit_<Name>` method is valid if `ast.<Name>` exists and subclasses
     `ast.AST` — the same contract `ast.NodeVisitor` dispatches on.
@@ -118,10 +119,8 @@ def _validate_rules(rules: list[Rule]) -> None:
             ast_name = attr.removeprefix("visit_")
             target = getattr(ast, ast_name, None)
             if not (isinstance(target, type) and issubclass(target, ast.AST)):
-                print(
-                    f"nib warning: {cls.__name__}.{attr} targets unknown ast "
-                    f"class {ast_name!r}",
-                    file=sys.stderr,
+                warnings.warn(
+                    f"{cls.__name__}.{attr} targets unknown ast " f"class {ast_name!r}"
                 )
 
 
@@ -333,7 +332,20 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _show_warning(message, category, filename, lineno, file=None, line=None):
+    # Keep nib's rule-author warnings clean: no `__main__.py:42: UserWarning:`
+    # prefix. Other warnings keep the default format.
+    if category is UserWarning:
+        print(f"{_c('nib warning:', '33')} {message}", file=sys.stderr)
+    else:
+        sys.stderr.write(
+            warnings.formatwarning(message, category, filename, lineno, line)
+        )
+
+
 def main() -> int:
+    warnings.showwarning = _show_warning
+
     parser = _build_parser()
     args = parser.parse_args()
 

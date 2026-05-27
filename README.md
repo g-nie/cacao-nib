@@ -97,13 +97,6 @@ The comment must sit on the same line as the diagnostic's reported position
 - Structured parse-error diagnostics. `ast.parse` raises `SyntaxError`; we
   currently skip the file and continue. Emit a single `E000`-style diagnostic
   instead of a stderr line, so it shows up in the regular output stream.
-- Switch rule-author warnings from `print(..., file=sys.stderr)` to
-  `warnings.warn(...)` — the idiomatic Python channel for "you're using the API
-  wrong, but I'll do my best". Supports dedup, filtering, and capture via
-  `warnings.catch_warnings()` for free. CLI would install a
-  `warnings.showwarning` shim (~5 lines) to keep output clean (no
-  `__main__.py:42: UserWarning:` noise). Worth doing once nib gets embedded
-  somewhere other than the CLI (editor plugin, etc.).
 - Minimal semantic model — an imports table per module (mapping local names to
   their fully-qualified origin, including `import x as y` and `from a.b import c`).
   Rules currently can't reliably answer "is this `Call` really

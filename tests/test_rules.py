@@ -54,18 +54,19 @@ def test_visitor_multiple_rules_distinct_codes():
     assert codes == ["X001", "X002"]
 
 
-def test_non_diagnostic_items_are_dropped_with_warning(capsys):
+def test_non_diagnostic_items_are_dropped_with_warning(recwarn):
     mod = nib.parse_module("eval(eval('x'))\n")
     diags = nib.run(mod, [CountNames()])
     assert diags == []
-    err = capsys.readouterr().err
-    assert "CountNames.visit_Name" in err
-    assert "expected Diagnostic" in err
-    # Deduped: warning fires once per (rule, method, kind) even across many nodes.
-    assert err.count("CountNames.visit_Name") == 1
+    msgs = [str(w.message) for w in recwarn.list]
+    assert any(
+        "CountNames.visit_Name" in m and "expected Diagnostic" in m for m in msgs
+    )
+    # Default filter dedupes identical messages → fires once across many nodes.
+    assert sum("CountNames.visit_Name" in m for m in msgs) == 1
 
 
-def test_single_diagnostic_return_wrapped_with_warning(capsys):
+def test_single_diagnostic_return_wrapped_with_warning(recwarn):
     class BadReturn(nib.Rule):
         code = "BAD"
 
@@ -76,9 +77,8 @@ def test_single_diagnostic_return_wrapped_with_warning(capsys):
     diags = nib.run(mod, [BadReturn()])
     assert len(diags) == 2
     assert all(d.code == "BAD" for d in diags)
-    err = capsys.readouterr().err
-    assert "BadReturn.visit_Name" in err
-    assert "single Diagnostic" in err
+    msgs = [str(w.message) for w in recwarn.list]
+    assert any("BadReturn.visit_Name" in m and "single Diagnostic" in m for m in msgs)
 
 
 def test_visit_module_fires_once():

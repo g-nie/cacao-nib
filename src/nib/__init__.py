@@ -1,5 +1,5 @@
 import ast
-import sys
+import warnings
 from collections.abc import Callable
 
 __all__ = ["Diagnostic", "Rule", "ast", "parse_module", "run"]
@@ -76,15 +76,11 @@ def _rule_visitors(cls: type) -> dict[type, str]:
 
 def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
     results: list[Diagnostic] = []
-    # (rule_class_name, method, kind) — dedupe runtime warnings per rule+method.
-    warned: set[tuple[str, str, str]] = set()
 
-    def _warn(rule_cls: str, method: str, kind: str, msg: str) -> None:
-        key = (rule_cls, method, kind)
-        if key in warned:
-            return
-        warned.add(key)
-        print(f"nib warning: {rule_cls}.{method} {msg}", file=sys.stderr)
+    def _warn(rule_cls: str, method: str, msg: str) -> None:
+        # Unique message text per (rule, method, msg) → default warning filter
+        # already dedupes;
+        warnings.warn(f"{rule_cls}.{method} {msg}", stacklevel=3)
 
     # Build visitors_by_node_type table once: ast_class -> [(rule, bound_fn, method_name), ...].
     # Per-node lookup becomes one dict.get plus only the relevant visitors;
@@ -108,7 +104,6 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
                     _warn(
                         cls_name,
                         method,
-                        "single",
                         "returned a single Diagnostic; wrap it in a list",
                     )
                     out = [out]
@@ -118,7 +113,6 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
                     _warn(
                         cls_name,
                         method,
-                        "noniter",
                         f"returned non-iterable {type(out).__name__}; "
                         "expected list of Diagnostic",
                     )
@@ -129,7 +123,6 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
                         _warn(
                             cls_name,
                             method,
-                            "nondiag",
                             f"returned list contained {type(item).__name__}; "
                             "expected Diagnostic (dropped)",
                         )
