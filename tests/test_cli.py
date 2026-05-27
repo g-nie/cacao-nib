@@ -44,20 +44,20 @@ def test_check_single_file_full_output():
     result = _run("check", "demo/sample.py", "--plugins", "demo.rules")
     assert result.returncode == 1
     assert result.stdout.splitlines() == [
-        "demo/sample.py:5:4: error[DEMO001] no print()",
-        "demo/sample.py:8:6: error[DEMO002] lambda has 4 args, max 3 — use def",
-        "demo/sample.py:12:11: error[DEMO003] or-chain of 4 — prefer `in {...}`",
+        "demo/sample.py:5:5: error[DEMO001] no print()",
+        "demo/sample.py:8:7: error[DEMO002] lambda has 4 args, max 3 — use def",
+        "demo/sample.py:12:12: error[DEMO003] or-chain of 4 — prefer `in {...}`",
         # DEMO004 fires twice — `"hello, " + name + "!"` is two nested BinOps,
         # each with a string operand, so both match the rule independently.
-        "demo/sample.py:16:11: error[DEMO004] string concat — use an f-string or .join",
-        "demo/sample.py:16:11: error[DEMO004] string concat — use an f-string or .join",
-        "demo/sample.py:20:7: error[DEMO005] compare to None with `is`, not `==`",
-        "demo/sample.py:25:0: error[DEMO006] function 'list' shadows a builtin",
-        "demo/sample.py:29:0: error[DEMO007] class name 'bad_class' "
+        "demo/sample.py:16:12: error[DEMO004] string concat — use an f-string or .join",
+        "demo/sample.py:16:12: error[DEMO004] string concat — use an f-string or .join",
+        "demo/sample.py:20:8: error[DEMO005] compare to None with `is`, not `==`",
+        "demo/sample.py:25:1: error[DEMO006] function 'list' shadows a builtin",
+        "demo/sample.py:29:1: error[DEMO007] class name 'bad_class' "
         "should be PascalCase",
-        "demo/sample.py:34:4: error[DEMO008] chained assignment with 2 targets "
+        "demo/sample.py:34:5: error[DEMO008] chained assignment with 2 targets "
         "— split it",
-        "demo/sample.py:38:0: error[DEMO009] function 'configure' has 7 parameters, "
+        "demo/sample.py:38:1: error[DEMO009] function 'configure' has 7 parameters, "
         "max 5",
         "Found 10 issues.",
     ]

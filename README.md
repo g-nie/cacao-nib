@@ -87,9 +87,8 @@ The comment must sit on the same line as the diagnostic's reported position
 
 ## Roadmap
 
-- Structured parse-error diagnostics. `ast.parse` raises `SyntaxError`; we
-  currently skip the file and continue. Emit a single `E000`-style diagnostic
-  instead of a stderr line, so it shows up in the regular output stream.
+- run test coverage now
+
 - Minimal semantic model — an imports table per module (mapping local names to
   their fully-qualified origin, including `import x as y` and `from a.b import c`).
   Rules currently can't reliably answer "is this `Call` really

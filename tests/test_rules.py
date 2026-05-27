@@ -95,9 +95,9 @@ def test_diagnostic_span_pulled_from_node():
     assert len(diags) == 1
     d = diags[0]
     assert d.lineno == 1
-    assert d.col_offset == 4
+    assert d.col_offset == 5
     assert d.end_lineno == 1
-    assert d.end_col_offset == 14
+    assert d.end_col_offset == 15
 
 
 def test_multiple_diagnostics_from_one_node():

@@ -222,16 +222,33 @@ def _select_rules(rule_classes, select: list[str], ignore: list[str]):
 
 def _load_plugins(plugins_arg: list[str]) -> int:
     """Make cwd importable, then import plugins from `[tool.nib]` config +
-    CLI flag. Returns `EXIT_OK`, or `EXIT_USAGE` if any import fails."""
+    CLI flag. Returns `EXIT_OK`, or `EXIT_USAGE` on failure. A plugin with
+    a syntax error emits an `invalid-syntax` diagnostic and bails — there's
+    no useful work to do without rules loaded."""
     sys.path.insert(0, str(Path.cwd()))
     cfg = _config_nib()
     for mod_name in dict.fromkeys(list(cfg.get("plugins", [])) + plugins_arg):
         try:
             importlib.import_module(mod_name)
+        except SyntaxError as e:
+            _print_diagnostic(
+                e.filename or mod_name, e.lineno, e.offset, "invalid-syntax", e.msg
+            )
+            return EXIT_DIAGNOSTICS
         except ImportError as e:
             print(f"nib: failed to import plugin {mod_name!r}: {e}", file=sys.stderr)
             return EXIT_USAGE
     return EXIT_OK
+
+
+def _print_diagnostic(file, lineno: int, col: int, code: str, message: str):
+    """Render a diagnostic line on stdout in the canonical `path:line:col`
+    format. `lineno` and `col` are 1-based; `None` falls back to 1 so callers
+    can pass `SyntaxError.lineno`/`offset` directly."""
+    print(
+        f"{file}:{lineno or 1}:{col or 1}: "
+        f"{_c('error', '31')}[{_c(code, '1', '4')}] {message}"
+    )
 
 
 def _cmd_rules(args) -> int:
@@ -384,17 +401,19 @@ def main() -> int:
             source = file.read_text()
             mod = parse_module(source)
             diags = run(mod, rules)
-        except (OSError, UnicodeDecodeError, SyntaxError) as e:
+        except SyntaxError as e:
+            _print_diagnostic(file, e.lineno, e.offset, "invalid-syntax", e.msg)
+            issues += 1
+            exit_code = EXIT_DIAGNOSTICS
+            continue
+        except (OSError, UnicodeDecodeError) as e:
             print(f"{file}: skipped ({type(e).__name__}: {e})", file=sys.stderr)
             continue
         if diags:
             if suppressions := _parse_line_suppressions(source):
                 diags = _filter_suppressed(diags, suppressions)
             for d in diags:
-                print(
-                    f"{file}:{d.lineno}:{d.col_offset}: "
-                    f"{_c('error', '31')}[{_c(d.code, '1', '4')}] {d.message}"
-                )
+                _print_diagnostic(file, d.lineno, d.col_offset, d.code, d.message)
                 issues += 1
                 exit_code = EXIT_DIAGNOSTICS
     print(f"Found {issues} issue{'s' if issues != 1 else ''}.")

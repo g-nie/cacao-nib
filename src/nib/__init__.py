@@ -16,10 +16,13 @@ class Diagnostic:
     )
 
     def __init__(self, node, message: str):
-        self.lineno = getattr(node, "lineno", 0)
-        self.col_offset = getattr(node, "col_offset", 0)
+        # 1-based line and column to match editor/CI conventions and
+        # SyntaxError.offset. stdlib ast gives 0-based columns, so we shift.
+        self.lineno = getattr(node, "lineno", 1)
+        self.col_offset = getattr(node, "col_offset", 0) + 1
         self.end_lineno = getattr(node, "end_lineno", None)
-        self.end_col_offset = getattr(node, "end_col_offset", None)
+        end_col = getattr(node, "end_col_offset", None)
+        self.end_col_offset = None if end_col is None else end_col + 1
         self.message = message
         self.code = ""
 
