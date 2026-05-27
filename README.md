@@ -87,6 +87,10 @@ The comment must sit on the same line as the diagnostic's reported position
 
 ## Roadmap
 
+- Check-loop performance — make a single cold `nib check` run faster
+  without relying on caching. Profile the parse + walk + dispatch pipeline
+  and look for wins (parallelism across files, cheaper per-node dispatch,
+  fewer redundant traversals when many rules visit the same node types).
 - Minimal semantic model — an imports table per module (mapping local names to
   their fully-qualified origin, including `import x as y` and `from a.b import c`).
   Rules currently can't reliably answer "is this `Call` really
@@ -101,61 +105,6 @@ The comment must sit on the same line as the diagnostic's reported position
   "is this symbol referenced anywhere else?" or "is this module ever
   imported from an entry point?" — the kind of check that fails silently
   without whole-project visibility.
-- Autofixes. The shape of this depends on a tradeoff worth flagging early:
-  stdlib `ast` discards whitespace, comments, and exact formatting, so we
-  can't round-trip source through it (Fixit avoids this by building on
-  LibCST; ruff sidesteps it by working on byte ranges). Three viable paths:
-  - **Text-range edits (ruff-style).** `Diagnostic` gains an optional `fix`
-    field carrying one or more `(start_offset, end_offset, replacement)`
-    edits. Rules compute these from `node.lineno`/`col_offset`/
-    `end_lineno`/`end_col_offset` (already populated by stdlib ast). CLI
-    applies non-overlapping edits in reverse order. Keeps the framework
-    pure-Python and lets rules stay simple, but every rule must hand-build
-    its replacement string — no structural editing helpers.
-  - **CST detour.** Pull in LibCST (or `ast` + `tokenize` for whitespace)
-    only when a rule opts into fixing. Heavier dependency, but rule authors
-    get safe structural edits.
-  - **`ast.unparse` reformat.** Lossy — strips comments, normalizes
-    formatting. Only acceptable for whole-file regeneration tools, not a
-    linter. Mentioned so it's explicitly ruled out.
-  Recommended starting point: text-range edits, gated behind `--fix` /
-  `--fix-only`, with a `--diff` preview mode. Revisit CST if rules start
-  needing structural rewrites that text edits can't express cleanly.
-- `--strict` mode that turns per-file skips into failures.
-- Rule-testing utilities for plugin authors — a `nib.testing` helper that takes
-  a source string + rule class and returns diagnostics, so plugins can write
-  tight unit tests without spawning the CLI. Fixit ships something similar.
-- Output formats — `--format json` for machine consumption and
-  `--format github` for `::error file=...,line=...` CI annotations. Cheap to
-  add, removes the need for wrapper scripts in CI.
-- Expanded default diagnostic format with a source snippet and a
-  caret span pointing at the offending tokens, plus a `help:` line when a rule
-  has a suggested fix. Sketch:
-
-  ```
-  E711 Comparison to `None` should be `cond is None`
-    --> demo/sample.py:20:13
-     |
-  19 | def needs_value(x):
-  20 |     if x == None:  # DEMO005
-     |             ^^^^
-  21 |         return "missing"
-  22 |     return x
-     |
-  help: Replace with `cond is None`
-  ```
-
-  Add `--format concise` to keep the current one-line `path:line:col: ...`
-  output for grep/editor workflows. Needs `end_lineno`/`end_col_offset` to be
-  populated (already on `Diagnostic`) and a source-snippet renderer.
-- Severity levels on diagnostics (`error` / `warning` / `info`) with an
-  exit-code policy (e.g. `--exit-zero`, or non-zero only on errors). Lets rule
-  authors signal intent instead of every diagnostic being equally fatal.
 - Result caching — skip files whose `(mtime, size, rule-set-hash)` is
   unchanged since the last run. More work, but the baseline ruff/mypy users
   now expect.
-- `generic_visit` hook — let rules opt into "visit every node" without
-  listing every `visit_<Name>`. Mirrors stdlib `ast.NodeVisitor`.
-- Per-file lifecycle hooks (`enter_module(node)` / `leave_module(node)`) so
-  rules can reset accumulated state cleanly instead of stashing it on `self`
-  and hoping.
