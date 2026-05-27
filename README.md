@@ -132,13 +132,32 @@ The comment must sit on the same line as the diagnostic's reported position
   `--fix-only`, with a `--diff` preview mode. Revisit CST if rules start
   needing structural rewrites that text edits can't express cleanly.
 - `--strict` mode that turns per-file skips into failures.
-- Final summary line (`N files checked, M skipped, K issues`).
 - Rule-testing utilities for plugin authors — a `nib.testing` helper that takes
   a source string + rule class and returns diagnostics, so plugins can write
   tight unit tests without spawning the CLI. Fixit ships something similar.
 - Output formats — `--format json` for machine consumption and
   `--format github` for `::error file=...,line=...` CI annotations. Cheap to
   add, removes the need for wrapper scripts in CI.
+- Expanded default diagnostic format with a source snippet and a
+  caret span pointing at the offending tokens, plus a `help:` line when a rule
+  has a suggested fix. Sketch:
+
+  ```
+  E711 Comparison to `None` should be `cond is None`
+    --> demo/sample.py:20:13
+     |
+  19 | def needs_value(x):
+  20 |     if x == None:  # DEMO005
+     |             ^^^^
+  21 |         return "missing"
+  22 |     return x
+     |
+  help: Replace with `cond is None`
+  ```
+
+  Add `--format concise` to keep the current one-line `path:line:col: ...`
+  output for grep/editor workflows. Needs `end_lineno`/`end_col_offset` to be
+  populated (already on `Diagnostic`) and a source-snippet renderer.
 - Severity levels on diagnostics (`error` / `warning` / `info`) with an
   exit-code policy (e.g. `--exit-zero`, or non-zero only on errors). Lets rule
   authors signal intent instead of every diagnostic being equally fatal.

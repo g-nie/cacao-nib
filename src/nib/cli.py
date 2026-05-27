@@ -379,6 +379,7 @@ def main() -> int:
         return EXIT_OK  # nothing to enforce — skip the file walk entirely
 
     exit_code = EXIT_OK
+    issues = 0
     for file in _collect_py_files(args.path, force_exclude=args.force_exclude):
         try:
             source = file.read_text()
@@ -395,7 +396,9 @@ def main() -> int:
                     f"{file}:{d.lineno}:{d.col_offset}: "
                     f"{_c('error', '31')}[{_c(d.code, '1', '4')}] {d.message}"
                 )
+                issues += 1
                 exit_code = EXIT_DIAGNOSTICS
+    print(f"Found {issues} issue{'s' if issues != 1 else ''}.")
     return exit_code
 
 

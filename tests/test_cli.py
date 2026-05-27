@@ -59,6 +59,7 @@ def test_check_single_file_full_output():
         "— split it",
         "demo/sample.py:38:0: error[DEMO009] function 'configure' has 7 parameters, "
         "max 5",
+        "Found 10 issues.",
     ]
 
 
