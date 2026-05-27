@@ -81,6 +81,20 @@ def test_single_diagnostic_return_wrapped_with_warning(recwarn):
     assert any("BadReturn.visit_Name" in m and "single Diagnostic" in m for m in msgs)
 
 
+def test_non_iterable_return_warns_and_skips(recwarn):
+    class BadReturn(nib.Rule):
+        code = "BAD"
+
+        def visit_Name(self, node):
+            return 42  # not None, not a Diagnostic, not iterable
+
+    mod = nib.parse_module("a\n")
+    diags = nib.run(mod, [BadReturn()])
+    assert diags == []
+    msgs = [str(w.message) for w in recwarn.list]
+    assert any("BadReturn.visit_Name" in m and "non-iterable int" in m for m in msgs)
+
+
 def test_visit_module_fires_once():
     mod = nib.parse_module("eval(1)\neval(2)\n")
     diags = nib.run(mod, [ModuleVisitor()])

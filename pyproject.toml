@@ -18,8 +18,9 @@ scripts.nib = "nib.cli:main"
 [dependency-groups]
 dev = [
   "astpretty",
-  "pytest",
   # "pytest-xdist",
+  "coverage",
+  "pytest",
 ]
 
 [tool.hatch]

@@ -87,8 +87,6 @@ The comment must sit on the same line as the diagnostic's reported position
 
 ## Roadmap
 
-- run test coverage now
-
 - Minimal semantic model — an imports table per module (mapping local names to
   their fully-qualified origin, including `import x as y` and `from a.b import c`).
   Rules currently can't reliably answer "is this `Call` really
