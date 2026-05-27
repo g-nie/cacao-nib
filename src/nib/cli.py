@@ -17,8 +17,8 @@ EXIT_OK = 0
 EXIT_DIAGNOSTICS = 1  # lint ran cleanly but found violations
 EXIT_USAGE = 2  # bad invocation / config / unloadable plugin
 
-# Directory names always pruned during a recursive walk — same set ruff uses
-# by default. An explicit path on the CLI bypasses this (unless --force-exclude).
+# Directory names always pruned during a recursive walk.
+# An explicit path on the CLI bypasses this (unless --force-exclude).
 DEFAULT_EXCLUDE = frozenset(
     {
         ".bzr",
@@ -71,9 +71,8 @@ def _collect_py_files(path: Path, *, force_exclude: bool = False) -> list[Path]:
     """Resolve a CLI path arg to a list of `.py` files.
 
     Directories are walked with `DEFAULT_EXCLUDE` pruning. Explicit file paths
-    bypass that pruning by default (ruff parity) — pass `force_exclude=True`
-    to apply the excludes even to explicitly-passed paths, the mode pre-commit
-    hooks want so config excludes aren't silently ignored.
+    bypass that pruning by default — pass `force_exclude=True`
+    to apply the excludes even to explicitly-passed paths.
     """
     if force_exclude and any(part in DEFAULT_EXCLUDE for part in path.parts):
         return []
@@ -140,7 +139,7 @@ def _parse_line_suppressions(source: str) -> dict[int, set[str] | None]:
     `codes is None` means "suppress every code on this line" and a set means
     "suppress only these codes". Bare `# noqa` is blanket; `# noqa:` with no
     codes is a no-op (the colon signals "I'm listing codes" — empty list
-    means none). The `noqa` keyword is case-insensitive (ruff/flake8 parity);
+    means none). The `noqa` keyword is case-insensitive;
     rule codes themselves are matched literally.
 
     Implementation: regex-scan, no tokenize. False positive: a literal

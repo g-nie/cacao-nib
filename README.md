@@ -76,8 +76,6 @@ select/ignore them as a set. A name can't be used as both a `code` and a
 
 ## Suppressing diagnostics
 
-Per-line `# noqa` comments work like ruff/flake8:
-
 ```python
 eval("x")              # noqa            — suppress every code on this line
 eval("x")              # noqa: X001      — suppress only X001
@@ -89,11 +87,6 @@ The comment must sit on the same line as the diagnostic's reported position
 
 ## Roadmap
 
-- File-level suppressions and unused-suppression reporting. Per-line `# noqa`
-  / `# noqa: X001,X002` is implemented (ruff/flake8 syntax). Still missing:
-  a file-level form (likely `# nib: noqa` / `# nib: noqa: X001` — ruff and
-  flake8 namespace theirs, so we should too) and a diagnostic for
-  suppressions that didn't silence anything.
 - Structured parse-error diagnostics. `ast.parse` raises `SyntaxError`; we
   currently skip the file and continue. Emit a single `E000`-style diagnostic
   instead of a stderr line, so it shows up in the regular output stream.
