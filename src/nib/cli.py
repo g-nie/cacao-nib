@@ -463,6 +463,87 @@ def _worker_thread(
         interpreter.close()
 
 
+def _run_serial(files: list[Path], rules: list[Rule]) -> tuple[int, int]:
+    """Check `files` in this interpreter, emitting each result as it's produced.
+    Returns `(issues, exit_code)`."""
+    issues = 0
+    exit_code = EXIT_OK
+    for file in files:
+        added, ec = _emit_result(_check_file(file, rules))
+        issues += added
+        if ec == EXIT_DIAGNOSTICS:
+            exit_code = EXIT_DIAGNOSTICS
+    return issues, exit_code
+
+
+def _run_parallel(
+    files: list[Path],
+    n_workers: int,
+    plugins: list[str],
+    select: list[str],
+    ignore: list[str],
+) -> tuple[int, int]:
+    """Fan `files` out across `n_workers` subinterpreters and stream results in
+    file order. Returns `(issues, exit_code)`.
+
+    We only pass the CLI `plugins`/`select`/`ignore` tokens to workers (as
+    shareable tuples); each subinterpreter re-runs `_load_plugins` — which
+    merges `[tool.nib] plugins` from pyproject itself — and `_select_rules`
+    against its own registry to build its rule instances.
+    """
+    work_q = interpreters.create_queue()
+    result_q = interpreters.create_queue()
+    for f in files:
+        work_q.put(str(f))
+    for _ in range(n_workers):
+        work_q.put(None)  # sentinel per worker
+
+    # Signalled once we've drained every result, releasing the workers to close
+    # their subinterpreters (see `_worker_thread` for why that ordering matters).
+    drained = threading.Event()
+    threads = [
+        threading.Thread(
+            target=_worker_thread,
+            args=(
+                work_q,
+                result_q,
+                tuple(plugins),
+                tuple(select),
+                tuple(ignore),
+                drained,
+            ),
+            daemon=True,
+        )
+        for _ in range(n_workers)
+    ]
+    for t in threads:
+        t.start()
+
+    # Stream results in file order as they arrive: hold a reorder buffer and
+    # flush the contiguous run starting at `next_idx` each time a result lands.
+    # Workers pull from a shared queue roughly in order, so the head-of-line
+    # seldom stalls — output appears progressively rather than all at once,
+    # while still matching serial's file order.
+    order = {str(f): i for i, f in enumerate(files)}
+    pending: dict[int, tuple] = {}
+    next_idx = 0
+    issues = 0
+    exit_code = EXIT_OK
+    for _ in range(len(files)):
+        r = result_q.get()  # untyped cross-interp queue → element type is opaque
+        pending[order[r[0]]] = r
+        while next_idx in pending:
+            added, ec = _emit_result(pending.pop(next_idx))
+            issues += added
+            if ec == EXIT_DIAGNOSTICS:
+                exit_code = EXIT_DIAGNOSTICS
+            next_idx += 1
+    drained.set()  # all results pulled — workers may now close their interps
+    for t in threads:
+        t.join()
+    return issues, exit_code
+
+
 def _show_warning(message, category, filename, lineno, file=None, line=None):
     # Keep nib's rule-author warnings clean: no `__main__.py:42: UserWarning:`
     # prefix. Other warnings keep the default format.
@@ -511,72 +592,20 @@ def main() -> int:
 
     files = _collect_py_files(args.path, force_exclude=args.force_exclude)
 
-    exit_code = EXIT_OK
-    issues = 0
-
     # Auto-parallelise across cores on Python 3.14+ (subinterpreters).
     # Scale worker count by file count so each worker has enough work to
-    # amortise its ~hundreds-of-ms setup (plugins, build rule
-    # instances). Below ~100 files we stay serial.
+    # amortise its ~hundreds-of-ms setup (plugins, build rule instances).
+    # Below ~100 files we stay serial.
     _FILES_PER_WORKER = 50
     cpu_count = os.process_cpu_count() or 1
     n_workers = min(cpu_count, max(1, len(files) // _FILES_PER_WORKER))
 
     if n_workers > 1:
-        work_q = interpreters.create_queue()
-        result_q = interpreters.create_queue()
-        for f in files:
-            work_q.put(str(f))
-        for _ in range(n_workers):
-            work_q.put(None)  # sentinel per worker
-
-        # Each subinterpreter re-runs `_load_plugins` (which merges
-        # `[tool.nib] plugins` + CLI plugins itself via `_config_nib()`),
-        # so we only need to pass the CLI flag value through.
-        plugins_t = tuple(args.plugins)
-        select_t = tuple(select)
-        ignore_t = tuple(ignore)
-
-        # Signalled once main has drained every result, releasing the workers
-        # to close their subinterpreters (see `_worker_thread`).
-        drained = threading.Event()
-        threads = [
-            threading.Thread(
-                target=_worker_thread,
-                args=(work_q, result_q, plugins_t, select_t, ignore_t, drained),
-                daemon=True,
-            )
-            for _ in range(n_workers)
-        ]
-        for t in threads:
-            t.start()
-
-        # Stream results in file order as they arrive: hold a reorder buffer
-        # and flush the contiguous run starting at `next_idx` each time a
-        # result lands. Workers pull from a shared queue roughly in order, so
-        # the head-of-line seldom stalls — output appears progressively rather
-        # than all at once, while still matching serial's file order.
-        order = {str(f): i for i, f in enumerate(files)}
-        pending: dict[int, tuple] = {}
-        next_idx = 0
-        for _ in range(len(files)):
-            r = result_q.get()  # untyped cross-interp queue → annotate
-            pending[order[r[0]]] = r
-            while next_idx in pending:
-                added, ec = _emit_result(pending.pop(next_idx))
-                issues += added
-                if ec == EXIT_DIAGNOSTICS:
-                    exit_code = EXIT_DIAGNOSTICS
-                next_idx += 1
-        drained.set()  # all results pulled — workers may now close their interps
-        for t in threads:
-            t.join()
-    else:  # serial: few files or single core
-        for file in files:
-            added, ec = _emit_result(_check_file(file, rules))
-            issues += added
-            if ec == EXIT_DIAGNOSTICS:
-                exit_code = EXIT_DIAGNOSTICS
+        issues, exit_code = _run_parallel(
+            files, n_workers, args.plugins, select, ignore
+        )
+    else:  # few files or single core
+        issues, exit_code = _run_serial(files, rules)
 
     print(f"Found {issues} issue{'s' if issues != 1 else ''}.")
     return exit_code

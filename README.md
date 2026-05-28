@@ -87,6 +87,8 @@ The comment must sit on the same line as the diagnostic's reported position
 
 ## Roadmap
 
+- Graceful Ctrl+C - no traceback display
+
 - Check-loop performance — make a single cold `nib check` run faster
   without relying on caching. Profile the parse + walk + dispatch pipeline
   and look for wins (parallelism across files, cheaper per-node dispatch,
