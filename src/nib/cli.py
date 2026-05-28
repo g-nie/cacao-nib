@@ -161,19 +161,6 @@ def _parse_line_suppressions(source: str) -> dict[int, set[str] | None]:
     return out
 
 
-def _filter_suppressed(diags, suppressions: dict[int, set[str] | None]):
-    kept = []
-    for d in diags:
-        codes = suppressions.get(d.lineno, "miss")
-        if codes == "miss":
-            kept.append(d)
-            continue
-        if codes is None or d.code in codes:
-            continue
-        kept.append(d)
-    return kept
-
-
 @functools.cache
 def _config_nib() -> dict:
     """Read the `[tool.nib]` table from cwd's pyproject.toml, if any."""
@@ -381,30 +368,30 @@ def _check_file(file: Path, rules: list[Rule]) -> tuple:
     return file_str, source, diag_tuples, None
 
 
-def _emit_result(result: tuple) -> tuple[int, int]:
-    """Print whatever `_check_file` produced. Returns `(issues_added, exit_code)`."""
+def _emit_result(result: tuple) -> int:
+    """Print whatever `_check_file` produced. Returns the number of issues
+    emitted — the caller derives the exit code from the running total."""
     file_str, source, diag_tuples, err = result
     if err is not None:
         kind = err[0]
         if kind == "syntax":
             _, lineno, offset, msg = err
             _print_diagnostic(file_str, lineno, offset, "invalid-syntax", msg)
-            return 1, EXIT_DIAGNOSTICS
+            return 1
         # kind == "read"
         _, type_name, msg = err
         print(f"{file_str}: skipped ({type_name}: {msg})", file=sys.stderr)
-        return 0, EXIT_OK
-    if not diag_tuples:
-        return 0, EXIT_OK
+        return 0
     suppressions = _parse_line_suppressions(source) if source else {}
     issues = 0
     for lineno, col, _end_lineno, _end_col, message, code in diag_tuples:
-        codes = suppressions.get(lineno, "miss")
-        if codes != "miss" and (codes is None or code in codes):
-            continue
+        if lineno in suppressions:
+            codes = suppressions[lineno]
+            if codes is None or code in codes:  # blanket, or this code listed
+                continue
         _print_diagnostic(file_str, lineno, col, code, message)
         issues += 1
-    return issues, EXIT_DIAGNOSTICS if issues else EXIT_OK
+    return issues
 
 
 # --- subinterpreter worker plumbing -------------------------------------
@@ -463,17 +450,10 @@ def _worker_thread(
         interpreter.close()
 
 
-def _run_serial(files: list[Path], rules: list[Rule]) -> tuple[int, int]:
+def _run_serial(files: list[Path], rules: list[Rule]) -> int:
     """Check `files` in this interpreter, emitting each result as it's produced.
-    Returns `(issues, exit_code)`."""
-    issues = 0
-    exit_code = EXIT_OK
-    for file in files:
-        added, ec = _emit_result(_check_file(file, rules))
-        issues += added
-        if ec == EXIT_DIAGNOSTICS:
-            exit_code = EXIT_DIAGNOSTICS
-    return issues, exit_code
+    Returns the total issue count."""
+    return sum(_emit_result(_check_file(file, rules)) for file in files)
 
 
 def _run_parallel(
@@ -482,9 +462,9 @@ def _run_parallel(
     plugins: list[str],
     select: list[str],
     ignore: list[str],
-) -> tuple[int, int]:
+) -> int:
     """Fan `files` out across `n_workers` subinterpreters and stream results in
-    file order. Returns `(issues, exit_code)`.
+    file order. Returns the total issue count.
 
     We only pass the CLI `plugins`/`select`/`ignore` tokens to workers (as
     shareable tuples); each subinterpreter re-runs `_load_plugins` — which
@@ -528,20 +508,16 @@ def _run_parallel(
     pending: dict[int, tuple] = {}
     next_idx = 0
     issues = 0
-    exit_code = EXIT_OK
     for _ in range(len(files)):
         r = result_q.get()  # untyped cross-interp queue → element type is opaque
         pending[order[r[0]]] = r
         while next_idx in pending:
-            added, ec = _emit_result(pending.pop(next_idx))
-            issues += added
-            if ec == EXIT_DIAGNOSTICS:
-                exit_code = EXIT_DIAGNOSTICS
+            issues += _emit_result(pending.pop(next_idx))
             next_idx += 1
     drained.set()  # all results pulled — workers may now close their interps
     for t in threads:
         t.join()
-    return issues, exit_code
+    return issues
 
 
 def _show_warning(message, category, filename, lineno, file=None, line=None):
@@ -601,14 +577,12 @@ def main() -> int:
     n_workers = min(cpu_count, max(1, len(files) // _FILES_PER_WORKER))
 
     if n_workers > 1:
-        issues, exit_code = _run_parallel(
-            files, n_workers, args.plugins, select, ignore
-        )
+        issues = _run_parallel(files, n_workers, args.plugins, select, ignore)
     else:  # few files or single core
-        issues, exit_code = _run_serial(files, rules)
+        issues = _run_serial(files, rules)
 
     print(f"Found {issues} issue{'s' if issues != 1 else ''}.")
-    return exit_code
+    return EXIT_DIAGNOSTICS if issues else EXIT_OK
 
 
 if __name__ == "__main__":
