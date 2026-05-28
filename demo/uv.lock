@@ -12,6 +12,7 @@ source = { editable = "../" }
 [package.metadata.requires-dev]
 dev = [
     { name = "astpretty" },
+    { name = "coverage" },
     { name = "pytest" },
 ]
 

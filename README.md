@@ -108,3 +108,13 @@ The comment must sit on the same line as the diagnostic's reported position
 - Result caching — skip files whose `(mtime, size, rule-set-hash)` is
   unchanged since the last run. More work, but the baseline ruff/mypy users
   now expect.
+- Free-threaded parallelism — experiment with a three-way split of the check
+  loop and benchmark them against each other: serial, subinterpreters (current
+  parallel path, true multi-core on stock 3.14 via per-interpreter GILs), and a
+  plain-`threading` thread pool gated on `not sys._is_gil_enabled()` for the
+  3.14t free-threaded build. The free-threaded path shares one already-loaded
+  interpreter, so it skips the subinterpreter design's biggest cost — every
+  worker re-importing `nib` + plugins and rebuilding rule instances — but pays
+  free-threading's ~5–10% single-thread penalty. Open question worth measuring:
+  does dropping the per-worker bootstrap beat subinterpreters in practice, and
+  where's the file-count crossover?

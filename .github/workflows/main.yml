@@ -18,10 +18,6 @@ jobs:
     strategy:
       matrix:
         python-version:
-        - '3.11'
-        - '3.12'
-        - '3.13'
-        - '3.13t'
         - '3.14'
         - '3.14t'
 

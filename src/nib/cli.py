@@ -5,9 +5,11 @@ import importlib
 import os
 import re
 import sys
+import threading
 import tomllib
 import warnings
 from collections.abc import Iterator
+from concurrent import interpreters
 from pathlib import Path
 
 from nib import Rule, parse_module, run
@@ -119,7 +121,7 @@ def _validate_rules(rules: list[Rule]) -> None:
             target = getattr(ast, ast_name, None)
             if not (isinstance(target, type) and issubclass(target, ast.AST)):
                 warnings.warn(
-                    f"{cls.__name__}.{attr} targets unknown ast " f"class {ast_name!r}"
+                    f"{cls.__name__}.{attr} targets unknown ast class {ast_name!r}"
                 )
 
 
@@ -338,7 +340,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "CLI. Match the mode pre-commit hooks want — without it, an explicit "
         "path inside an excluded dir is linted anyway.",
     )
-
     sub.add_parser(
         "rules",
         parents=[plugins_parent],
@@ -346,6 +347,120 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+# --- file checking, shared by serial + parallel paths -------------------
+# Workers (in subinterpreters) can't ship `Diagnostic` instances back: each
+# interpreter has its own `Diagnostic` class. We return plain tuples of shareable
+# primitives so the same code path works whether the caller is the main
+# interpreter or a subinterpreter via `Interpreter.call`.
+
+
+def _check_file(file: Path, rules: list[Rule]) -> tuple:
+    """Parse and lint `file`. Returns `(file_str, source, diag_tuples, err)`.
+
+    `diag_tuples` is `tuple[(lineno, col, end_lineno, end_col, message, code)]`
+    — picked to be cross-interpreter shareable. `err` is `None` on success,
+    `("syntax", lineno, offset, msg)` for parse failures, or
+    `("read", exc_type_name, str(exc))` for read failures.
+    """
+    file_str = str(file)
+    try:
+        source = file.read_text()
+    except (OSError, UnicodeDecodeError) as e:
+        return file_str, None, (), ("read", type(e).__name__, str(e))
+    try:
+        mod = parse_module(source)
+    except SyntaxError as e:
+        return file_str, source, (), ("syntax", e.lineno or 1, e.offset or 1, e.msg)
+    diags = run(mod, rules)
+    diag_tuples = tuple(
+        (d.lineno, d.col_offset, d.end_lineno, d.end_col_offset, d.message, d.code)
+        for d in diags
+    )
+    return file_str, source, diag_tuples, None
+
+
+def _emit_result(result: tuple) -> tuple[int, int]:
+    """Print whatever `_check_file` produced. Returns `(issues_added, exit_code)`."""
+    file_str, source, diag_tuples, err = result
+    if err is not None:
+        kind = err[0]
+        if kind == "syntax":
+            _, lineno, offset, msg = err
+            _print_diagnostic(file_str, lineno, offset, "invalid-syntax", msg)
+            return 1, EXIT_DIAGNOSTICS
+        # kind == "read"
+        _, type_name, msg = err
+        print(f"{file_str}: skipped ({type_name}: {msg})", file=sys.stderr)
+        return 0, EXIT_OK
+    if not diag_tuples:
+        return 0, EXIT_OK
+    suppressions = _parse_line_suppressions(source) if source else {}
+    issues = 0
+    for lineno, col, _end_lineno, _end_col, message, code in diag_tuples:
+        codes = suppressions.get(lineno, "miss")
+        if codes != "miss" and (codes is None or code in codes):
+            continue
+        _print_diagnostic(file_str, lineno, col, code, message)
+        issues += 1
+    return issues, EXIT_DIAGNOSTICS if issues else EXIT_OK
+
+
+# --- subinterpreter worker plumbing -------------------------------------
+# Each subinterpreter gets its own `nib` module table, registry, and rule
+# instances. We resolve the final select/ignore token lists in the main
+# interpreter (so plugin import errors and registry-validation errors surface
+# once) and ship them to workers; each worker re-runs `_load_plugins` +
+# `_select_rules` against its own registry to build its rule instances. The
+# whole worker lifecycle runs in one `Interpreter.exec` so the rule list is
+# just a local in `_worker_loop` — no module-level state to manage.
+
+
+def _worker_loop(work_q, result_q, plugins: tuple, select: tuple, ignore: tuple):
+    """Runs *inside* a subinterpreter: build rules once, then drain `work_q`,
+    pushing each `_check_file` result tuple onto `result_q` until the `None`
+    sentinel arrives."""
+    sys.path.insert(0, str(Path.cwd()))
+    _load_plugins(list(plugins))
+    rules = [cls() for cls in _select_rules(Rule._registry, list(select), list(ignore))]
+    while (file_str := work_q.get()) is not None:
+        result_q.put(_check_file(Path(file_str), rules))
+
+
+# Executed via `Interpreter.exec` after `prepare_main` injects the queues and
+# token tuples as globals — `exec` takes a code string, not arguments.
+_WORKER_BOOTSTRAP = (
+    "from nib.cli import _worker_loop\n"
+    "_worker_loop(work_q, result_q, plugins, select, ignore)\n"
+)
+
+
+def _worker_thread(
+    work_q, result_q, plugins: tuple, select: tuple, ignore: tuple, drained
+):
+    """Driver thread: own one subinterpreter and run the worker loop in it.
+    Imported lazily — `concurrent.interpreters` only exists on Python 3.14+.
+
+    A result tuple on an `interpreters.Queue` is *bound* to the subinterpreter
+    that put it there; once that interpreter is destroyed the queued item turns
+    into a useless `UnboundQueueItem`. So after the loop finishes we hold the
+    interpreter open on `drained` until the main thread signals it has pulled
+    every result — only then do we close."""
+
+    interpreter = interpreters.create()
+    try:
+        interpreter.prepare_main(
+            work_q=work_q,
+            result_q=result_q,
+            plugins=plugins,
+            select=select,
+            ignore=ignore,
+        )
+        interpreter.exec(_WORKER_BOOTSTRAP)
+        drained.wait()
+    finally:
+        interpreter.close()
 
 
 def _show_warning(message, category, filename, lineno, file=None, line=None):
@@ -394,28 +509,75 @@ def main() -> int:
     if not rules:
         return EXIT_OK  # nothing to enforce — skip the file walk entirely
 
+    files = _collect_py_files(args.path, force_exclude=args.force_exclude)
+
     exit_code = EXIT_OK
     issues = 0
-    for file in _collect_py_files(args.path, force_exclude=args.force_exclude):
-        try:
-            source = file.read_text()
-            mod = parse_module(source)
-            diags = run(mod, rules)
-        except SyntaxError as e:
-            _print_diagnostic(file, e.lineno, e.offset, "invalid-syntax", e.msg)
-            issues += 1
-            exit_code = EXIT_DIAGNOSTICS
-            continue
-        except (OSError, UnicodeDecodeError) as e:
-            print(f"{file}: skipped ({type(e).__name__}: {e})", file=sys.stderr)
-            continue
-        if diags:
-            if suppressions := _parse_line_suppressions(source):
-                diags = _filter_suppressed(diags, suppressions)
-            for d in diags:
-                _print_diagnostic(file, d.lineno, d.col_offset, d.code, d.message)
-                issues += 1
+
+    # Auto-parallelise across cores on Python 3.14+ (subinterpreters).
+    # Scale worker count by file count so each worker has enough work to
+    # amortise its ~hundreds-of-ms setup (plugins, build rule
+    # instances). Below ~100 files we stay serial.
+    _FILES_PER_WORKER = 50
+    cpu_count = os.process_cpu_count() or 1
+    n_workers = min(cpu_count, max(1, len(files) // _FILES_PER_WORKER))
+
+    if n_workers > 1:
+        work_q = interpreters.create_queue()
+        result_q = interpreters.create_queue()
+        for f in files:
+            work_q.put(str(f))
+        for _ in range(n_workers):
+            work_q.put(None)  # sentinel per worker
+
+        # Each subinterpreter re-runs `_load_plugins` (which merges
+        # `[tool.nib] plugins` + CLI plugins itself via `_config_nib()`),
+        # so we only need to pass the CLI flag value through.
+        plugins_t = tuple(args.plugins)
+        select_t = tuple(select)
+        ignore_t = tuple(ignore)
+
+        # Signalled once main has drained every result, releasing the workers
+        # to close their subinterpreters (see `_worker_thread`).
+        drained = threading.Event()
+        threads = [
+            threading.Thread(
+                target=_worker_thread,
+                args=(work_q, result_q, plugins_t, select_t, ignore_t, drained),
+                daemon=True,
+            )
+            for _ in range(n_workers)
+        ]
+        for t in threads:
+            t.start()
+
+        # Stream results in file order as they arrive: hold a reorder buffer
+        # and flush the contiguous run starting at `next_idx` each time a
+        # result lands. Workers pull from a shared queue roughly in order, so
+        # the head-of-line seldom stalls — output appears progressively rather
+        # than all at once, while still matching serial's file order.
+        order = {str(f): i for i, f in enumerate(files)}
+        pending: dict[int, tuple] = {}
+        next_idx = 0
+        for _ in range(len(files)):
+            r = result_q.get()  # untyped cross-interp queue → annotate
+            pending[order[r[0]]] = r
+            while next_idx in pending:
+                added, ec = _emit_result(pending.pop(next_idx))
+                issues += added
+                if ec == EXIT_DIAGNOSTICS:
+                    exit_code = EXIT_DIAGNOSTICS
+                next_idx += 1
+        drained.set()  # all results pulled — workers may now close their interps
+        for t in threads:
+            t.join()
+    else:  # serial: few files or single core
+        for file in files:
+            added, ec = _emit_result(_check_file(file, rules))
+            issues += added
+            if ec == EXIT_DIAGNOSTICS:
                 exit_code = EXIT_DIAGNOSTICS
+
     print(f"Found {issues} issue{'s' if issues != 1 else ''}.")
     return exit_code
 
