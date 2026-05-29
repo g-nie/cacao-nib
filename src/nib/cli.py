@@ -184,9 +184,10 @@ def _check_code_group_collisions(rule_classes) -> set[str]:
 
 def _load_plugins(plugins_arg: list[str]) -> int:
     """Make cwd importable, then import plugins from `[tool.nib]` config +
-    CLI flag. Returns `EXIT_OK`, or `EXIT_USAGE` on failure. A plugin with
-    a syntax error emits an `invalid-syntax` diagnostic and bails — there's
-    no useful work to do without rules loaded."""
+    CLI flag. Returns `EXIT_OK`; `EXIT_DIAGNOSTICS` if a plugin has a syntax
+    error (emits an `invalid-syntax` diagnostic and bails — there's no useful
+    work to do without rules loaded); or `EXIT_USAGE` if a plugin won't
+    import."""
     sys.path.insert(0, str(Path.cwd()))
     cfg = _config_nib()
     for mod_name in dict.fromkeys(list(cfg.get("plugins", [])) + plugins_arg):
@@ -268,7 +269,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=_parse_codes,
         default=None,
         metavar="CODES",
-        help="comma-separated rule codes/prefixes to run; replaces "
+        help="comma-separated rule codes/groups to run; replaces "
         "`[tool.nib] select` from pyproject.toml.",
     )
     check.add_argument(
@@ -276,7 +277,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=_parse_codes,
         default=None,
         metavar="CODES",
-        help="comma-separated rule codes/prefixes to skip; replaces "
+        help="comma-separated rule codes/groups to skip; replaces "
         "`[tool.nib] ignore`. Ignore wins over select.",
     )
     check.add_argument(
