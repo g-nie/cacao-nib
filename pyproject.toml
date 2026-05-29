@@ -10,6 +10,9 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.14",
 ]
+dependencies = [
+  "psutil",
+]
 scripts.nib = "nib.cli:main"
 
 [dependency-groups]
@@ -25,4 +28,4 @@ build.targets.wheel.packages = [ "src/nib" ]
 build.targets.wheel.sources."src/nib" = "nib"
 
 [tool.black]
-target-version = [ "py311" ]
+target-version = [ "py314" ]

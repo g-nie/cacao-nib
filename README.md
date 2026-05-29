@@ -89,10 +89,8 @@ The comment must sit on the same line as the diagnostic's reported position
 
 - Graceful Ctrl+C - no traceback display
 
-- Check-loop performance — make a single cold `nib check` run faster
-  without relying on caching. Profile the parse + walk + dispatch pipeline
-  and look for wins (parallelism across files, cheaper per-node dispatch,
-  fewer redundant traversals when many rules visit the same node types).
+- Pre-commit support
+
 - Minimal semantic model — an imports table per module (mapping local names to
   their fully-qualified origin, including `import x as y` and `from a.b import c`).
   Rules currently can't reliably answer "is this `Call` really

@@ -260,7 +260,7 @@ def _cmd_rules(args) -> int:
         for cls in sorted(by_group[group], key=lambda c: (c.code or "", c.__name__)):
             code = cls.code or "(no code)"
             doc = (cls.__doc__ or "").strip().split("\n", 1)[0]
-            line = f"  {_c(code, '1', '4')}  {cls.__name__}"
+            line = f"  {_c(code, '1', '4')} {cls.__name__}"
             if doc:
                 line += f" — {doc}"
             print(line)
@@ -531,6 +531,26 @@ def _show_warning(message, category, filename, lineno, file=None, line=None):
         )
 
 
+def _max_workers() -> int:
+    """How many workers to run: one per physical core. Parsing and linting keeps
+    a core fully busy, so the extra logical cores don't help. Never more than the
+    CPUs we're actually allowed to use, though.
+
+    `psutil.cpu_count(logical=False)` seems to be the only reliable cross-platform way
+    to count physical cores. If psutil can't tell (returns `None`),
+    fall back to the logical count.
+
+    psutil is imported here and nowhere else: its C extension won't load in a
+    subinterpreter, and workers import this module. This function only runs in
+    the main interpreter, so the import stays clear of them.
+    """
+    import psutil
+
+    logical = os.process_cpu_count() or 1
+    physical = psutil.cpu_count(logical=False)
+    return min(logical, physical) if physical else logical
+
+
 def main() -> int:
     warnings.showwarning = _show_warning
 
@@ -568,13 +588,11 @@ def main() -> int:
 
     files = _collect_py_files(args.path, force_exclude=args.force_exclude)
 
-    # Auto-parallelise across cores on Python 3.14+ (subinterpreters).
-    # Scale worker count by file count so each worker has enough work to
-    # amortise its ~hundreds-of-ms setup (plugins, build rule instances).
-    # Below ~100 files we stay serial.
+    # Run files in parallel across subinterpreters (Python 3.14+), one worker per
+    # core (see `_max_workers`). Scale down when there are few files, so small
+    # runs stay cheap or serial.
     _FILES_PER_WORKER = 50
-    cpu_count = os.process_cpu_count() or 1
-    n_workers = min(cpu_count, max(1, len(files) // _FILES_PER_WORKER))
+    n_workers = min(_max_workers(), max(1, len(files) // _FILES_PER_WORKER))
 
     if n_workers > 1:
         issues = _run_parallel(files, n_workers, args.plugins, select, ignore)
