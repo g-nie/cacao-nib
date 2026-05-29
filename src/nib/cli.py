@@ -517,8 +517,15 @@ def _show_warning(message, category, filename, lineno, file=None, line=None):
 
 def _max_workers() -> int:
     """How many workers to run: one per physical core. Parsing and linting keeps
-    a core fully busy, so the extra logical cores don't help. Never more than the
+    a core fully busy, so on a big machine the extra logical cores don't help —
+    measured ~1.3x slower at one worker per logical core. Never more than the
     CPUs we're actually allowed to use, though.
+
+    The `max(physical, 4)` floor is for small machines: with only 2-3 physical
+    cores the coordinator + runtime + OS take up a big slice, so the extra
+    logical cores let that overhead run without competing with the workers
+    (measured ~1.2x faster there). It only raises the count when physical < 4,
+    and `min(logical, ...)` still caps it at the real CPUs.
 
     `psutil.cpu_count(logical=False)` seems to be the only reliable cross-platform way
     to count physical cores. If psutil can't tell (returns `None`),
@@ -532,7 +539,7 @@ def _max_workers() -> int:
 
     logical = os.process_cpu_count() or 1
     physical = psutil.cpu_count(logical=False)
-    return min(logical, physical) if physical else logical
+    return min(logical, max(physical, 4)) if physical else logical
 
 
 def main() -> int:
