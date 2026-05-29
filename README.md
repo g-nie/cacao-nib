@@ -111,19 +111,3 @@ The comment must sit on the same line as the diagnostic's reported position
   "is this symbol referenced anywhere else?" or "is this module ever
   imported from an entry point?" — the kind of check that fails silently
   without whole-project visibility.
-
-- Free-threaded parallelism — experiment with a three-way split of the check
-  loop and benchmark them against each other: serial, subinterpreters (current
-  parallel path, true multi-core on stock 3.14 via per-interpreter GILs), and a
-  plain-`threading` thread pool gated on `not sys._is_gil_enabled()` for the
-  3.14t free-threaded build. The free-threaded path shares one already-loaded
-  interpreter, so it skips the subinterpreter design's biggest cost — every
-  worker re-importing `nib` + plugins and rebuilding rule instances — but pays
-  free-threading's ~5–10% single-thread penalty. Open question worth measuring:
-  does dropping the per-worker bootstrap beat subinterpreters in practice, and
-  where's the file-count crossover?
-  - Caveat: subinterpreters give each worker its own `Rule` instances, so a
-    rule mutating `self` is isolated. A shared-interpreter thread pool must
-    keep that property — build per-thread rule instances (like
-    `parallel._worker_loop` does), or concurrent `self` mutation races and the
-    semantics drift from the serial/subinterpreter paths.

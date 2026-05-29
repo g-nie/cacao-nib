@@ -50,6 +50,7 @@ DEFAULT_EXCLUDE = frozenset(
 
 
 def _c(text: str, *codes: str) -> str:
+    """Colour `text` with ANSI `codes` for stdout (diagnostics)."""
     return _color(text, *codes, enabled=_color_enabled(sys.stdout))
 
 
