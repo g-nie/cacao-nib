@@ -12,6 +12,8 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from nib.output import _color, _color_enabled
+
 
 @functools.cache
 def _warn(msg: str) -> None:
@@ -23,7 +25,8 @@ def _warn(msg: str) -> None:
     (no `file:line: Category:` nib internals an end user doesn't care about) and
     reads identically in the main interpreter and in worker subinterpreters.
     """
-    print(f"nib warning: {msg}", file=sys.stderr)
+    label = _color("nib warning:", "33", enabled=_color_enabled(sys.stderr))
+    print(f"{label} {msg}", file=sys.stderr)
 
 
 class Diagnostic:

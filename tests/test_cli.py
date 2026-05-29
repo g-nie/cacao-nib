@@ -27,7 +27,7 @@ def _run(monkeypatch, capsys):
     nib.Rule._registry.clear()
     path_snapshot = list(sys.path)
     modules_snapshot = set(sys.modules)
-    monkeypatch.setattr(nib.cli, "_USE_COLOR", False)
+    monkeypatch.setenv("NO_COLOR", "1")  # plain output
 
     def run(*args: str, cwd: Path = PROJECT_ROOT) -> SimpleNamespace:
         monkeypatch.chdir(cwd)
@@ -141,6 +141,17 @@ def test_warns_on_visit_method_targeting_unknown_ast_class(_run, tmp_path):
     assert result.returncode == 0
     assert "Typo.visit_Cal" in result.stderr
     assert "'Cal'" in result.stderr
+
+
+def test_warns_when_plugin_registers_no_rules(_run, tmp_path):
+    (tmp_path / "emptyplugin.py").write_text(
+        "X = 1  # imports fine, no Rule subclass\n"
+    )
+    (tmp_path / "clean.py").write_text("x = 1\n")
+    result = _run("check", "clean.py", "--plugins", "emptyplugin", cwd=tmp_path)
+    assert result.returncode == 0
+    assert "emptyplugin" in result.stderr
+    assert "registered no rules" in result.stderr
 
 
 def test_plugin_with_syntax_error_emits_invalid_syntax_diagnostic(_run, tmp_path):

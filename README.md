@@ -87,7 +87,12 @@ The comment must sit on the same line as the diagnostic's reported position
 
 ## Roadmap
 
-- Show a warning if a provider plugin in --plugins has 0 Rule classes detected.
+- Result caching — skip files whose `(mtime, size, rule-set-hash)` is
+  unchanged since the last run. More work, but the baseline ruff/mypy users
+  now expect.
+  > cache the _max_workers() result as well
+
+- (maybe) Skip empty (0KB) python files.
 
 - Pre-commit support
 
@@ -106,13 +111,6 @@ The comment must sit on the same line as the diagnostic's reported position
   "is this symbol referenced anywhere else?" or "is this module ever
   imported from an entry point?" — the kind of check that fails silently
   without whole-project visibility.
-
-- Result caching — skip files whose `(mtime, size, rule-set-hash)` is
-  unchanged since the last run. More work, but the baseline ruff/mypy users
-  now expect.
-  > cache the _max_workers() result as well
-
-- (maybe) Skip empty (0KB) python files.
 
 - Free-threaded parallelism — experiment with a three-way split of the check
   loop and benchmark them against each other: serial, subinterpreters (current

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from nib import Rule, parallel
 from nib.engine import _check_file, _select_rules, _warn
+from nib.output import _color, _color_enabled
 
 # Exit codes
 EXIT_OK = 0
@@ -47,15 +48,9 @@ DEFAULT_EXCLUDE = frozenset(
     }
 )
 
-# Color only when stdout is a real terminal and NO_COLOR isn't set
-# (https://no-color.org). Piped/redirected output stays plain.
-_USE_COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
-
 
 def _c(text: str, *codes: str) -> str:
-    if not _USE_COLOR:
-        return text
-    return f"\x1b[{';'.join(codes)}m{text}\x1b[0m"
+    return _color(text, *codes, enabled=_color_enabled(sys.stdout))
 
 
 def _walk_py_files(root: Path) -> Iterator[Path]:
@@ -201,11 +196,11 @@ def _load_plugins(plugins_arg: list[str]) -> int:
     """Make cwd importable, then import plugins from `[tool.nib]` config +
     CLI flag. Returns `EXIT_OK`; `EXIT_DIAGNOSTICS` if a plugin has a syntax
     error (emits an `invalid-syntax` diagnostic and bails — there's no useful
-    work to do without rules loaded); or `EXIT_USAGE` if a plugin won't
-    import."""
+    work to do without rules loaded); or `EXIT_USAGE` if a plugin won't import."""
     sys.path.insert(0, str(Path.cwd()))
     cfg = _config_nib()
     for mod_name in dict.fromkeys(list(cfg.get("plugins", [])) + plugins_arg):
+        rules_before = len(Rule._registry)
         try:
             importlib.import_module(mod_name)
         except SyntaxError as e:
@@ -216,6 +211,10 @@ def _load_plugins(plugins_arg: list[str]) -> int:
         except ImportError as e:
             print(f"nib: failed to import plugin {mod_name!r}: {e}", file=sys.stderr)
             return EXIT_USAGE
+        # A plugin that registers nothing is usually a wrong/misnamed module —
+        # flag it rather than silently linting with no rules.
+        if len(Rule._registry) == rules_before:
+            _warn(f"plugin {mod_name!r} registered no rules")
     return EXIT_OK
 
 
