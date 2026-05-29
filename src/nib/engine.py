@@ -6,8 +6,11 @@ them, so `from nib import Diagnostic, Rule, parse_module, run` keeps working.
 """
 
 import ast
+import importlib
+import sys
 import warnings
 from collections.abc import Callable
+from pathlib import Path
 
 
 class Diagnostic:
@@ -173,3 +176,72 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
 
     walk(module)
     return results
+
+
+def _select_rules(rule_classes, select: list[str], ignore: list[str]):
+    """Filter `rule_classes` by code/group tokens. Ignore wins over select.
+
+    Empty `select` means "all rules". Tokens that match neither a code nor a
+    group are silently dropped — they just don't contribute any rules.
+    """
+    by_code = {c.code: c for c in rule_classes if c.code}
+    by_group: dict[str, list] = {}
+    for c in rule_classes:
+        if c.group:
+            by_group.setdefault(c.group, []).append(c)
+
+    def resolve(tokens: list[str]) -> set:
+        out: set = set()
+        for tok in tokens:
+            if tok in by_code:
+                out.add(by_code[tok])
+            if tok in by_group:
+                out.update(by_group[tok])
+        return out
+
+    selected = resolve(select) if select else set(rule_classes)
+    ignored = resolve(ignore)
+    return [c for c in rule_classes if c in selected and c not in ignored]
+
+
+def _import_plugins(modules: list[str]) -> None:
+    """Make cwd importable, then import each plugin module so its `Rule`
+    subclasses register. The names are assumed already validated in the main
+    interpreter (this runs inside worker subinterpreters), so import failures
+    aren't reported here — see `cli._load_plugins` for the validated path."""
+    sys.path.insert(0, str(Path.cwd()))
+    for name in modules:
+        importlib.import_module(name)
+
+
+# Workers (in subinterpreters) can't ship `Diagnostic` instances back: each
+# interpreter has its own `Diagnostic` class. `_check_file` returns plain tuples
+# of shareable primitives so the same code path works whether it runs in the
+# main interpreter or in a worker subinterpreter (results cross back over the
+# queue).
+
+
+def _check_file(file: Path, rules: list["Rule"]) -> tuple:
+    """Parse and lint `file`. Returns `(file_str, source, diag_tuples, err)`.
+
+    `diag_tuples` is `tuple[(lineno, col, end_lineno, end_col, message, code)]`
+    — picked to be cross-interpreter shareable. `err` is `None` on success,
+    otherwise `(kind, *details)` where `kind` is the first element and is one of:
+    `("syntax", lineno, offset, msg)` for parse failures, or
+    `("read", exc_type_name, str(exc))` for read failures.
+    """
+    file_str = str(file)
+    try:
+        source = file.read_text()
+    except (OSError, UnicodeDecodeError) as e:
+        return file_str, None, (), ("read", type(e).__name__, str(e))
+    try:
+        mod = parse_module(source)
+    except SyntaxError as e:
+        return file_str, source, (), ("syntax", e.lineno or 1, e.offset or 1, e.msg)
+    diags = run(mod, rules)
+    diag_tuples = tuple(
+        (d.lineno, d.col_offset, d.end_lineno, d.end_col_offset, d.message, d.code)
+        for d in diags
+    )
+    return file_str, source, diag_tuples, None

@@ -10,7 +10,8 @@ import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
-from nib import Rule, parse_module, run
+from nib import Rule, parallel
+from nib.engine import _check_file, _select_rules
 
 # Exit codes
 EXIT_OK = 0
@@ -181,32 +182,6 @@ def _check_code_group_collisions(rule_classes) -> set[str]:
     return codes & groups
 
 
-def _select_rules(rule_classes, select: list[str], ignore: list[str]):
-    """Filter `rule_classes` by code/group tokens. Ignore wins over select.
-
-    Empty `select` means "all rules". Tokens that match neither a code nor a
-    group are silently dropped — they just don't contribute any rules.
-    """
-    by_code = {c.code: c for c in rule_classes if c.code}
-    by_group: dict[str, list] = {}
-    for c in rule_classes:
-        if c.group:
-            by_group.setdefault(c.group, []).append(c)
-
-    def resolve(tokens: list[str]) -> set:
-        out: set = set()
-        for tok in tokens:
-            if tok in by_code:
-                out.add(by_code[tok])
-            if tok in by_group:
-                out.update(by_group[tok])
-        return out
-
-    selected = resolve(select) if select else set(rule_classes)
-    ignored = resolve(ignore)
-    return [c for c in rule_classes if c in selected and c not in ignored]
-
-
 def _load_plugins(plugins_arg: list[str]) -> int:
     """Make cwd importable, then import plugins from `[tool.nib]` config +
     CLI flag. Returns `EXIT_OK`, or `EXIT_USAGE` on failure. A plugin with
@@ -334,38 +309,6 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-# --- file checking, shared by serial + parallel paths -------------------
-# Workers (in subinterpreters) can't ship `Diagnostic` instances back: each
-# interpreter has its own `Diagnostic` class. We return plain tuples of shareable
-# primitives so the same code path works whether the caller is the main
-# interpreter or a subinterpreter via `Interpreter.call`.
-
-
-def _check_file(file: Path, rules: list[Rule]) -> tuple:
-    """Parse and lint `file`. Returns `(file_str, source, diag_tuples, err)`.
-
-    `diag_tuples` is `tuple[(lineno, col, end_lineno, end_col, message, code)]`
-    — picked to be cross-interpreter shareable. `err` is `None` on success,
-    `("syntax", lineno, offset, msg)` for parse failures, or
-    `("read", exc_type_name, str(exc))` for read failures.
-    """
-    file_str = str(file)
-    try:
-        source = file.read_text()
-    except (OSError, UnicodeDecodeError) as e:
-        return file_str, None, (), ("read", type(e).__name__, str(e))
-    try:
-        mod = parse_module(source)
-    except SyntaxError as e:
-        return file_str, source, (), ("syntax", e.lineno or 1, e.offset or 1, e.msg)
-    diags = run(mod, rules)
-    diag_tuples = tuple(
-        (d.lineno, d.col_offset, d.end_lineno, d.end_col_offset, d.message, d.code)
-        for d in diags
-    )
-    return file_str, source, diag_tuples, None
-
-
 def _emit_result(result: tuple) -> int:
     """Print whatever `_check_file` produced. Returns the number of issues
     emitted — the caller derives the exit code from the running total."""
@@ -438,6 +381,8 @@ def main() -> int:
     ignore = (
         args.ignore if args.ignore is not None else list(cfg.get("ignore", []))
     ) + args.extend_ignore
+    # Final plugin list (`[tool.nib]` + CLI); workers re-import these by name.
+    plugins = list(dict.fromkeys([*cfg.get("plugins", []), *args.plugins]))
     rules = [cls() for cls in _select_rules(Rule._registry, select, ignore)]
     _validate_rules(rules)
 
@@ -446,16 +391,15 @@ def main() -> int:
 
     files = _collect_py_files(args.path, force_exclude=args.force_exclude)
 
-    # Local import to keep `nib.parallel` -> `nib.cli` acyclic.
-    # The `chunks > 1` guard means `_max_workers` only runs on big runs.
-    from nib import parallel
-
+    # Parallelise across cores when there's enough work; otherwise stay serial.
+    # `_max_workers` only runs past the `chunks` guard.
     _FILES_PER_WORKER = 50
     chunks = len(files) // _FILES_PER_WORKER
     n_workers = min(parallel._max_workers(), chunks) if chunks > 1 else 1
 
     if n_workers > 1:
-        issues = parallel._run_parallel(files, n_workers, args.plugins, select, ignore)
+        results = parallel._run_parallel(files, n_workers, plugins, select, ignore)
+        issues = sum(_emit_result(r) for r in results)
     else:  # few files or single core
         issues = _run_serial(files, rules)
 
