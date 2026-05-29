@@ -113,6 +113,9 @@ The comment must sit on the same line as the diagnostic's reported position
 - Result caching — skip files whose `(mtime, size, rule-set-hash)` is
   unchanged since the last run. More work, but the baseline ruff/mypy users
   now expect.
+
+- (maybe) Skip empty (0KB) python files.
+
 - Free-threaded parallelism — experiment with a three-way split of the check
   loop and benchmark them against each other: serial, subinterpreters (current
   parallel path, true multi-core on stock 3.14 via per-interpreter GILs), and a
@@ -123,3 +126,8 @@ The comment must sit on the same line as the diagnostic's reported position
   free-threading's ~5–10% single-thread penalty. Open question worth measuring:
   does dropping the per-worker bootstrap beat subinterpreters in practice, and
   where's the file-count crossover?
+  - Caveat: subinterpreters give each worker its own `Rule` instances, so a
+    rule mutating `self` is isolated. A shared-interpreter thread pool must
+    keep that property — build per-thread rule instances (like
+    `parallel._worker_loop` does), or concurrent `self` mutation races and the
+    semantics drift from the serial/subinterpreter paths.
