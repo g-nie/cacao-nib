@@ -101,12 +101,12 @@ def _run_parallel(
     pending: dict[int, tuple] = {}
     next_idx = 0
     for _ in range(len(files)):
-        r = result_q.get()  # untyped cross-interp queue → element type is opaque
+        r = result_q.get()  # untyped cross-interpreter queue → element type is opaque
         pending[order[r[0]]] = r
         while next_idx in pending:
             yield pending.pop(next_idx)
             next_idx += 1
-    drained.set()  # all results pulled — workers may now close their interps
+    drained.set()  # all results pulled — workers may now close their interpreters
     for t in threads:
         t.join()
 

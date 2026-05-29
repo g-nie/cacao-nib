@@ -6,18 +6,24 @@ them, so `from nib import Diagnostic, Rule, parse_module, run` keeps working.
 """
 
 import ast
+import functools
 import importlib
 import sys
-import warnings
 from collections.abc import Callable
 from pathlib import Path
 
 
-class NibWarning(UserWarning):
-    """nib's own rule-author warnings (misdefined visitors, bad return types).
-    A dedicated category lets the CLI format these distinctly from
-    third-party/Python warnings, which it passes through in the default format.
+@functools.cache
+def _warn(msg: str) -> None:
+    """Warn a rule author about a misdefined rule (unknown visitor target, bad
+    return type, …), printing `nib warning: <msg>` to stderr once per message.
+
+    Deliberately not the `warnings` module: these fire per AST node, so the
+    `@cache` dedupes to avoid flooding; and a plain print keeps the line clean
+    (no `file:line: Category:` nib internals an end user doesn't care about) and
+    reads identically in the main interpreter and in worker subinterpreters.
     """
+    print(f"nib warning: {msg}", file=sys.stderr)
 
 
 class Diagnostic:
@@ -126,11 +132,6 @@ def _iter_children(node):
 def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
     results: list[Diagnostic] = []
 
-    def _warn(rule_cls: str, method: str, msg: str) -> None:
-        # Unique message text per (rule, method, msg) → default warning filter
-        # already dedupes;
-        warnings.warn(f"{rule_cls}.{method} {msg}", NibWarning, stacklevel=3)
-
     # Build visitors_by_node_type table once: ast_class -> [(rule, bound_fn, method_name), ...].
     # Per-node lookup becomes one dict.get plus only the relevant visitors;
     # rules with no visitor for this node type aren't iterated at all.
@@ -151,29 +152,24 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
                 cls_name = type(rule).__name__
                 if isinstance(out, Diagnostic):
                     _warn(
-                        cls_name,
-                        method,
-                        "returned a single Diagnostic; wrap it in a list",
+                        f"{cls_name}.{method} returned a single Diagnostic; "
+                        "wrap it in a list"
                     )
                     out = [out]
                 try:
                     items = list(out)
                 except TypeError:
                     _warn(
-                        cls_name,
-                        method,
-                        f"returned non-iterable {type(out).__name__}; "
-                        "expected list of Diagnostic",
+                        f"{cls_name}.{method} returned non-iterable "
+                        f"{type(out).__name__}; expected list of Diagnostic"
                     )
                     continue
                 rule_code = getattr(type(rule), "code", "")
                 for item in items:
                     if not isinstance(item, Diagnostic):
                         _warn(
-                            cls_name,
-                            method,
-                            f"returned list contained {type(item).__name__}; "
-                            "expected Diagnostic (dropped)",
+                            f"{cls_name}.{method} returned list contained "
+                            f"{type(item).__name__}; expected Diagnostic (dropped)"
                         )
                         continue
                     item.code = rule_code

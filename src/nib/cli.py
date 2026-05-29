@@ -6,12 +6,11 @@ import os
 import re
 import sys
 import tomllib
-import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
 from nib import Rule, parallel
-from nib.engine import NibWarning, _check_file, _select_rules
+from nib.engine import _check_file, _select_rules, _warn
 
 # Exit codes
 EXIT_OK = 0
@@ -119,10 +118,7 @@ def _validate_rules(rules: list[Rule]) -> None:
             ast_name = attr.removeprefix("visit_")
             target = getattr(ast, ast_name, None)
             if not (isinstance(target, type) and issubclass(target, ast.AST)):
-                warnings.warn(
-                    f"{cls.__name__}.{attr} targets unknown ast class {ast_name!r}",
-                    NibWarning,
-                )
+                _warn(f"{cls.__name__}.{attr} targets unknown ast class {ast_name!r}")
 
 
 # `#` (possibly preceded by whitespace, followed by `noqa` and a word boundary)
@@ -343,20 +339,7 @@ def _run_serial(files: list[Path], rules: list[Rule]) -> int:
     return sum(_emit_result(_check_file(file, rules)) for file in files)
 
 
-def _show_warning(message, category, filename, lineno, file=None, line=None):
-    # Keep nib's own rule-author warnings clean: no `__main__.py:42: NibWarning:`
-    # prefix. Third-party/Python warnings (any other category) keep the default
-    # format so they're not mistaken for nib's.
-    if issubclass(category, NibWarning):
-        print(f"{_c('nib warning:', '33')} {message}", file=sys.stderr)
-    else:
-        sys.stderr.write(
-            warnings.formatwarning(message, category, filename, lineno, line)
-        )
-
-
 def main() -> int:
-    warnings.showwarning = _show_warning
 
     parser = _build_parser()
     args = parser.parse_args()

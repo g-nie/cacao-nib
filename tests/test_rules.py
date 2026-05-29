@@ -1,5 +1,15 @@
+import pytest
+
 import nib
+import nib.engine
 from nib import Diagnostic, ast
+
+
+@pytest.fixture(autouse=True)
+def _reset_warn_dedup():
+    # `_warn` dedupes per process (functools.cache); clear it so each test
+    # sees its own warning regardless of order.
+    nib.engine._warn.cache_clear()
 
 
 class NoEval(nib.Rule):
@@ -54,19 +64,17 @@ def test_visitor_multiple_rules_distinct_codes():
     assert codes == ["X001", "X002"]
 
 
-def test_non_diagnostic_items_are_dropped_with_warning(recwarn):
+def test_non_diagnostic_items_are_dropped_with_warning(capsys):
     mod = nib.parse_module("eval(eval('x'))\n")
     diags = nib.run(mod, [CountNames()])
     assert diags == []
-    msgs = [str(w.message) for w in recwarn.list]
-    assert any(
-        "CountNames.visit_Name" in m and "expected Diagnostic" in m for m in msgs
-    )
-    # Default filter dedupes identical messages → fires once across many nodes.
-    assert sum("CountNames.visit_Name" in m for m in msgs) == 1
+    err = capsys.readouterr().err
+    assert "CountNames.visit_Name" in err and "expected Diagnostic" in err
+    # Deduped → fires once across many nodes.
+    assert err.count("CountNames.visit_Name") == 1
 
 
-def test_single_diagnostic_return_wrapped_with_warning(recwarn):
+def test_single_diagnostic_return_wrapped_with_warning(capsys):
     class BadReturn(nib.Rule):
         code = "BAD"
 
@@ -77,11 +85,11 @@ def test_single_diagnostic_return_wrapped_with_warning(recwarn):
     diags = nib.run(mod, [BadReturn()])
     assert len(diags) == 2
     assert all(d.code == "BAD" for d in diags)
-    msgs = [str(w.message) for w in recwarn.list]
-    assert any("BadReturn.visit_Name" in m and "single Diagnostic" in m for m in msgs)
+    err = capsys.readouterr().err
+    assert "BadReturn.visit_Name" in err and "single Diagnostic" in err
 
 
-def test_non_iterable_return_warns_and_skips(recwarn):
+def test_non_iterable_return_warns_and_skips(capsys):
     class BadReturn(nib.Rule):
         code = "BAD"
 
@@ -91,8 +99,8 @@ def test_non_iterable_return_warns_and_skips(recwarn):
     mod = nib.parse_module("a\n")
     diags = nib.run(mod, [BadReturn()])
     assert diags == []
-    msgs = [str(w.message) for w in recwarn.list]
-    assert any("BadReturn.visit_Name" in m and "non-iterable int" in m for m in msgs)
+    err = capsys.readouterr().err
+    assert "BadReturn.visit_Name" in err and "non-iterable int" in err
 
 
 def test_visit_module_fires_once():
