@@ -572,11 +572,13 @@ def main() -> int:
 
     files = _collect_py_files(args.path, force_exclude=args.force_exclude)
 
-    # Run files in parallel across subinterpreters (Python 3.14+), one worker per
-    # core (see `_max_workers`). Scale down when there are few files, so small
-    # runs stay cheap or serial.
+    # Run files in parallel across subinterpreters, one worker per core
+    # (see `_max_workers`). Scale down when there are few files, so small
+    # runs stay cheap or serial. The `> 1` guard also skips `_max_workers`
+    # (and its ~150ms psutil import) on small/serial runs.
     _FILES_PER_WORKER = 50
-    n_workers = min(_max_workers(), max(1, len(files) // _FILES_PER_WORKER))
+    by_files = max(1, len(files) // _FILES_PER_WORKER)
+    n_workers = min(_max_workers(), by_files) if by_files > 1 else 1
 
     if n_workers > 1:
         issues = _run_parallel(files, n_workers, args.plugins, select, ignore)
