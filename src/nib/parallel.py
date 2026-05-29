@@ -12,7 +12,6 @@ re-import the plugins and rebuild their rule instances against their own
 registry.
 """
 
-import os
 import threading
 from concurrent import interpreters
 from pathlib import Path
@@ -109,31 +108,3 @@ def _run_parallel(
     drained.set()  # all results pulled — workers may now close their interpreters
     for t in threads:
         t.join()
-
-
-def _max_workers() -> int:
-    """How many workers to run: one per physical core. Parsing and linting keeps
-    a core fully busy, so on a big machine the extra logical cores don't help —
-    measured ~1.3x slower at one worker per logical core. Never more than the
-    CPUs we're actually allowed to use, though.
-
-    The `max(physical, 4)` floor is for small machines: with only 2-3 physical
-    cores the coordinator + runtime + OS take up a big slice, so the extra
-    logical cores let that overhead run without competing with the workers
-    (measured ~1.2x faster there). It only raises the count when physical < 4,
-    and `min(logical, ...)` still caps it at the real CPUs.
-
-    `psutil.cpu_count(logical=False)` seems to be the only reliable cross-platform way
-    to count physical cores. If psutil can't tell (returns `None`),
-    fall back to the logical count.
-
-    psutil is imported lazily here: its C extension won't load in a
-    subinterpreter, and workers import this module to reach `_worker_loop`.
-    `_max_workers` only runs in the main interpreter, so the import stays clear
-    of them.
-    """
-    import psutil
-
-    logical = os.process_cpu_count() or 1
-    physical = psutil.cpu_count(logical=False)
-    return min(logical, max(physical, 4)) if physical else logical

@@ -339,8 +339,31 @@ def _run_serial(files: list[Path], rules: list[Rule]) -> int:
     return sum(_emit_result(_check_file(file, rules)) for file in files)
 
 
-def main() -> int:
+def _max_workers() -> int:
+    """How many workers to run: one per physical core. Parsing and linting keeps
+    a core fully busy, so on a big machine the extra logical cores don't help —
+    measured ~1.3x slower at one worker per logical core. Never more than the
+    CPUs we're actually allowed to use, though.
 
+    The `max(physical, 4)` floor is for small machines: with only 2-3 physical
+    cores the coordinator + runtime + OS take up a big slice, so the extra
+    logical cores let that overhead run without competing with the workers
+    (measured ~1.2x faster there). It only raises the count when physical < 4,
+    and `min(logical, ...)` still caps it at the real CPUs.
+
+    `psutil.cpu_count(logical=False)` seems to be the only reliable cross-platform
+    way to count physical cores. If psutil can't tell (returns `None`), fall back
+    to the logical count. Imported lazily so serial runs (which never call this)
+    don't pay psutil's import cost.
+    """
+    import psutil
+
+    logical = os.process_cpu_count() or 1
+    physical = psutil.cpu_count(logical=False)
+    return min(logical, max(physical, 4)) if physical else logical
+
+
+def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
 
@@ -381,7 +404,7 @@ def main() -> int:
     # `_max_workers` only runs past the `chunks` guard.
     _FILES_PER_WORKER = 50
     chunks = len(files) // _FILES_PER_WORKER
-    n_workers = min(parallel._max_workers(), chunks) if chunks > 1 else 1
+    n_workers = min(_max_workers(), chunks) if chunks > 1 else 1
 
     if n_workers > 1:
         results = parallel._run_parallel(files, n_workers, plugins, select, ignore)
