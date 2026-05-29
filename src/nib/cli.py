@@ -86,6 +86,17 @@ def _find_rules_missing_code(rule_classes) -> list[type]:
     return [c for c in rule_classes if not c.code]
 
 
+def _find_duplicate_codes(rule_classes) -> dict[str, list[str]]:
+    """Codes claimed by more than one rule, as `{code: [rule names]}`.
+    A clash would make `--select`/`--ignore` on that code ambiguous, so we treat it
+    as a misconfiguration."""
+    by_code: dict[str, list[str]] = {}
+    for c in rule_classes:
+        if c.code:
+            by_code.setdefault(c.code, []).append(c.__name__)
+    return {code: names for code, names in by_code.items() if len(names) > 1}
+
+
 def _validate_registry(rule_classes) -> int:
     """Static checks on the loaded rule registry. Returns `EXIT_OK` or
     `EXIT_USAGE`, printing the first failure to stderr."""
@@ -100,6 +111,13 @@ def _validate_registry(rule_classes) -> int:
     if missing:
         names = ", ".join(c.__name__ for c in missing)
         print(f"nib: rule(s) without a `code` attribute: {names}", file=sys.stderr)
+        return EXIT_USAGE
+    if duplicates := _find_duplicate_codes(rule_classes):
+        detail = "; ".join(
+            f"{code!r}: {', '.join(names)}"
+            for code, names in sorted(duplicates.items())
+        )
+        print(f"nib: code used by more than one rule: {detail}", file=sys.stderr)
         return EXIT_USAGE
     return EXIT_OK
 

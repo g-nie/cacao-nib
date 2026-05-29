@@ -275,6 +275,26 @@ def test_code_group_collision_errors(_run, tmp_path):
     assert "'X'" in result.stderr
 
 
+def test_duplicate_code_errors(_run, tmp_path):
+    (tmp_path / "dupes.py").write_text(
+        "from nib import Diagnostic, Rule\n"
+        "class R1(Rule):\n"
+        "    code = 'X001'\n"
+        "    def visit_Name(self, node):\n"
+        "        return [Diagnostic(node, '')]\n"
+        "class R2(Rule):\n"
+        "    code = 'X001'\n"  # same code as R1
+        "    def visit_Name(self, node):\n"
+        "        return [Diagnostic(node, '')]\n"
+    )
+    (tmp_path / "f.py").write_text("a\n")
+    result = _run("check", "f.py", "--plugins", "dupes", cwd=tmp_path)
+    assert result.returncode == 2
+    assert "more than one rule" in result.stderr
+    assert "'X001'" in result.stderr
+    assert "R1" in result.stderr and "R2" in result.stderr
+
+
 def test_ignore_wins_over_select(_run, tmp_path):
     _three_rule_plugin(tmp_path)
     result = _run(
