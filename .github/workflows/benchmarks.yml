@@ -37,6 +37,12 @@ jobs:
     - name: Sync env
       run: uv sync
 
+    - name: Show CPU topology (TEMP debug)
+      run: |
+        uv run python -c "import os, psutil; print('logical:', os.process_cpu_count(), '| physical:', psutil.cpu_count(logical=False))"
+        nproc
+        lscpu | grep -E '^CPU\(s\)|Thread|Core|Socket' || true
+
     # Pin a specific Django commit so the benchmark target never drifts.
     # Cache key is the SHA, so this download only happens once per SHA bump.
     - name: Cache Django source

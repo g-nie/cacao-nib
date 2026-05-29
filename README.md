@@ -89,7 +89,12 @@ The comment must sit on the same line as the diagnostic's reported position
 
 - Graceful Ctrl+C - no traceback display
 
+- Do we already handle code duplicates?
+
+- Show a warning if a provider plugin in --plugins has 0 Rule classes detected.
+
 - Pre-commit support
+
 
 - Minimal semantic model — an imports table per module (mapping local names to
   their fully-qualified origin, including `import x as y` and `from a.b import c`).
