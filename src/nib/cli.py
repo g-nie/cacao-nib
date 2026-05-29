@@ -584,8 +584,8 @@ def main() -> int:
     # runs stay cheap or serial. The `> 1` guard also skips `_max_workers`
     # (and its ~150ms psutil import) on small/serial runs.
     _FILES_PER_WORKER = 50
-    by_files = max(1, len(files) // _FILES_PER_WORKER)
-    n_workers = min(_max_workers(), by_files) if by_files > 1 else 1
+    chunks = len(files) // _FILES_PER_WORKER
+    n_workers = min(_max_workers(), chunks) if chunks > 1 else 1
 
     if n_workers > 1:
         issues = _run_parallel(files, n_workers, args.plugins, select, ignore)
