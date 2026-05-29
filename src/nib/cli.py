@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from nib import Rule, parallel
-from nib.engine import _check_file, _select_rules
+from nib.engine import NibWarning, _check_file, _select_rules
 
 # Exit codes
 EXIT_OK = 0
@@ -120,7 +120,8 @@ def _validate_rules(rules: list[Rule]) -> None:
             target = getattr(ast, ast_name, None)
             if not (isinstance(target, type) and issubclass(target, ast.AST)):
                 warnings.warn(
-                    f"{cls.__name__}.{attr} targets unknown ast class {ast_name!r}"
+                    f"{cls.__name__}.{attr} targets unknown ast class {ast_name!r}",
+                    NibWarning,
                 )
 
 
@@ -343,9 +344,10 @@ def _run_serial(files: list[Path], rules: list[Rule]) -> int:
 
 
 def _show_warning(message, category, filename, lineno, file=None, line=None):
-    # Keep nib's rule-author warnings clean: no `__main__.py:42: UserWarning:`
-    # prefix. Other warnings keep the default format.
-    if category is UserWarning:
+    # Keep nib's own rule-author warnings clean: no `__main__.py:42: NibWarning:`
+    # prefix. Third-party/Python warnings (any other category) keep the default
+    # format so they're not mistaken for nib's.
+    if issubclass(category, NibWarning):
         print(f"{_c('nib warning:', '33')} {message}", file=sys.stderr)
     else:
         sys.stderr.write(

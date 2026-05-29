@@ -13,6 +13,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 
+class NibWarning(UserWarning):
+    """nib's own rule-author warnings (misdefined visitors, bad return types).
+    A dedicated category lets the CLI format these distinctly from
+    third-party/Python warnings, which it passes through in the default format.
+    """
+
+
 class Diagnostic:
     __slots__ = (
         "lineno",
@@ -122,7 +129,7 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
     def _warn(rule_cls: str, method: str, msg: str) -> None:
         # Unique message text per (rule, method, msg) → default warning filter
         # already dedupes;
-        warnings.warn(f"{rule_cls}.{method} {msg}", stacklevel=3)
+        warnings.warn(f"{rule_cls}.{method} {msg}", NibWarning, stacklevel=3)
 
     # Build visitors_by_node_type table once: ast_class -> [(rule, bound_fn, method_name), ...].
     # Per-node lookup becomes one dict.get plus only the relevant visitors;
