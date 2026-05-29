@@ -95,12 +95,12 @@ The comment must sit on the same line as the diagnostic's reported position
 
 - Pre-commit support
 
-
 - Minimal semantic model — an imports table per module (mapping local names to
   their fully-qualified origin, including `import x as y` and `from a.b import c`).
   Rules currently can't reliably answer "is this `Call` really
   `some.library.target`?" without re-implementing the walk themselves. Build
   it once, expose to rules.
+
 - Project-wide index + `self.project` on rules. Once per-module imports tables
   exist, aggregate them (plus top-level defs) into a project index built by a
   scan pass that runs before any rule fires. Framework injects it on every rule
@@ -110,9 +110,11 @@ The comment must sit on the same line as the diagnostic's reported position
   "is this symbol referenced anywhere else?" or "is this module ever
   imported from an entry point?" — the kind of check that fails silently
   without whole-project visibility.
+
 - Result caching — skip files whose `(mtime, size, rule-set-hash)` is
   unchanged since the last run. More work, but the baseline ruff/mypy users
   now expect.
+  > cache the _max_workers() result as well
 
 - (maybe) Skip empty (0KB) python files.
 

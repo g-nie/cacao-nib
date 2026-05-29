@@ -364,6 +364,15 @@ def _max_workers() -> int:
 
 
 def main() -> int:
+    try:
+        return _run_cli()
+    except KeyboardInterrupt:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(130)  # 128 + SIGINT
+
+
+def _run_cli() -> int:
     parser = _build_parser()
     args = parser.parse_args()
 
