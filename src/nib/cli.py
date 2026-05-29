@@ -415,19 +415,10 @@ def _worker_loop(work_q, result_q, plugins: tuple, select: tuple, ignore: tuple)
         result_q.put(_check_file(Path(file_str), rules))
 
 
-# Executed via `Interpreter.exec` after `prepare_main` injects the queues and
-# token tuples as globals — `exec` takes a code string, not arguments.
-_WORKER_BOOTSTRAP = (
-    "from nib.cli import _worker_loop\n"
-    "_worker_loop(work_q, result_q, plugins, select, ignore)\n"
-)
-
-
 def _worker_thread(
     work_q, result_q, plugins: tuple, select: tuple, ignore: tuple, drained
 ):
     """Driver thread: own one subinterpreter and run the worker loop in it.
-    Imported lazily — `concurrent.interpreters` only exists on Python 3.14+.
 
     A result tuple on an `interpreters.Queue` is *bound* to the subinterpreter
     that put it there; once that interpreter is destroyed the queued item turns
@@ -437,14 +428,7 @@ def _worker_thread(
 
     interpreter = interpreters.create()
     try:
-        interpreter.prepare_main(
-            work_q=work_q,
-            result_q=result_q,
-            plugins=plugins,
-            select=select,
-            ignore=ignore,
-        )
-        interpreter.exec(_WORKER_BOOTSTRAP)
+        interpreter.call(_worker_loop, work_q, result_q, plugins, select, ignore)
         drained.wait()
     finally:
         interpreter.close()
