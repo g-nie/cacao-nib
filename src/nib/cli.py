@@ -9,7 +9,7 @@ import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 
-from nib import Rule, parallel
+from nib import Rule, cache, parallel
 from nib.engine import _check_file, _select_rules, _warn
 from nib.output import _color, _color_enabled
 
@@ -316,6 +316,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "CLI. Match the mode pre-commit hooks want — without it, an explicit "
         "path inside an excluded dir is linted anyway.",
     )
+    check.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="don't read or write the result cache; check every file.",
+    )
+    check.add_argument(
+        "--cache-dir",
+        default=None,
+        metavar="DIR",
+        help=f"directory for the result cache "
+        f"(default: ./{cache.DEFAULT_CACHE_DIR}, or ${cache.CACHE_DIR_ENV}).",
+    )
     sub.add_parser(
         "rules",
         parents=[plugins_parent],
@@ -351,12 +363,7 @@ def _emit_result(result: tuple) -> int:
     return issues
 
 
-def _run_serial(files: list[Path], rules: list[Rule]) -> int:
-    """Check `files` in this interpreter, emitting each result as it's produced.
-    Returns the total issue count."""
-    return sum(_emit_result(_check_file(file, rules)) for file in files)
-
-
+@functools.cache
 def _max_workers() -> int:
     """How many workers to run: one per physical core. Parsing and linting keeps
     a core fully busy, so on a big machine the extra logical cores don't help —
@@ -419,13 +426,25 @@ def _run_cli() -> int:
     ) + args.extend_ignore
     # Final plugin list (`[tool.nib]` + CLI); workers re-import these by name.
     plugins = list(dict.fromkeys([*cfg.get("plugins", []), *args.plugins]))
-    rules = [cls() for cls in _select_rules(Rule._registry, select, ignore)]
+    selected = _select_rules(Rule._registry, select, ignore)
+    rules = [cls() for cls in selected]
     _validate_rules(rules)
 
     if not rules:
         return EXIT_OK  # nothing to enforce — skip the file walk entirely
 
     files = _collect_py_files(args.path, force_exclude=args.force_exclude)
+
+    # Result cache: drop files unchanged since they last linted clean. The cache
+    # file is keyed by nib version + enabled rule set, so a different ruleset
+    # never reads another's hits. Skipped files had zero diagnostics last time
+    # and (being unchanged) still do, so the issue total is unaffected.
+    cached: dict[str, cache.FileData] = {}
+    cache_path = None
+    if not args.no_cache:
+        cache_path = cache.cache_file(cache.ruleset_hash(selected), args.cache_dir)
+        cached = cache.load(cache_path)
+        files = [f for f in files if cache.is_changed(str(f), cached)]
 
     # Parallelise across cores when there's enough work; otherwise stay serial.
     # `_max_workers` only runs past the `chunks` guard.
@@ -435,9 +454,21 @@ def _run_cli() -> int:
 
     if n_workers > 1:
         results = parallel._run_parallel(files, n_workers, plugins, select, ignore)
-        issues = sum(_emit_result(r) for r in results)
     else:  # few files or single core
-        issues = _run_serial(files, rules)
+        results = (_check_file(file, rules) for file in files)
+
+    # Emit each result as it arrives, recording every file that linted clean so
+    # the next run can skip it. Files with diagnostics (or a read/syntax error)
+    # stay out of the cache and are re-checked every run until they're fixed.
+    issues = 0
+    for result in results:
+        n = _emit_result(result)
+        issues += n
+        file_str, _source, _diags, err = result
+        if cache_path is not None and err is None and n == 0:
+            cache.record(file_str, cached)
+    if cache_path is not None:
+        cache.write(cache_path, cached)
 
     print(f"Found {issues} issue{'s' if issues != 1 else ''}.")
     return EXIT_DIAGNOSTICS if issues else EXIT_OK

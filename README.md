@@ -85,12 +85,26 @@ eval("x"); print("y")  # noqa: X001,X002 — multiple codes
 The comment must sit on the same line as the diagnostic's reported position
 (for multi-line nodes, that's the start line). Case-insensitive.
 
+## Caching
+
+A re-run skips files that haven't changed since they last passed, so repeated
+`nib` invocations are near-instant on an unchanged tree. The cache lives in
+`./.cacao_nib_cache`, keyed by nib version and enabled rule set — a new release
+or a different `--select`/`--ignore`/plugin list starts fresh. Only clean files
+are cached; files with diagnostics are re-checked (and re-reported) until fixed.
+
+```sh
+nib check --no-cache             # ignore the cache: check every file
+nib check --cache-dir path/to/c  # use a different cache directory
+NIB_CACHE_DIR=path/to/c nib check
+```
+
+While iterating on a plugin rule's *logic* (without changing its code/group),
+pass `--no-cache` — the cache key tracks which rules run, not their source.
+
 ## Roadmap
 
-- Result caching — skip files whose `(mtime, size, rule-set-hash)` is
-  unchanged since the last run. More work, but the baseline ruff/mypy users
-  now expect.
-  > cache the _max_workers() result as well
+- (?) cache the _max_workers() result as well
 
 - (maybe) Skip empty (0KB) python files.
 
