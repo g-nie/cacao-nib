@@ -45,17 +45,31 @@ turns those spurious mtime misses back into hits instead of re-linting.
 
 ### What we store as the value
 
-Phase 1: just membership — "this file was clean at this `FileData`." A file is
-in the cache if it passed with zero diagnostics. Files with diagnostics are
-**not** cached, so they're always re-checked (and re-reported) until fixed.
+Phase 1 (done): just membership — "this file was clean at this `FileData`." A
+file is in the cache if it passed with zero diagnostics. Files *with*
+diagnostics are **not** cached, so they're always re-checked (and re-reported)
+until fixed.
 
-Phase 2 (only when `--fix` lands): store replayable diagnostics/edits per file
-so a cache hit can still emit `--fix` output without re-parsing.
+Phase 2a — diagnostic replay (independent of `--fix`): store each file's emitted
+diagnostics as the cache *value*, for clean and dirty files alike. On a cache
+hit the bytes are unchanged, so the findings (and their noqa outcome) are
+identical — replay the stored diagnostics straight to output instead of
+re-parsing. This is the high-leverage step: on a warm run, re-linting the
+files that report diagnostics dominates the wall time (measured ~94% on django
+— the files that trip rules are the big substantive modules, and Phase 1 still
+re-parses every one of them). Replay collapses that to a dict lookup + print.
+
+Phase 2b — `--fix` replay (later, only when `--fix` lands): also store the edit
+ranges per finding, so a cache hit can emit `--fix` output without re-parsing.
+2a is a prerequisite (same stored-value mechanism); `--fix` is just a second
+consumer of it.
 
 ### Store format
 
 A single pickle (highest protocol), one dict `{abspath: FileData}`, loaded in
-one read and written **atomically** (write temp file, `os.replace`).
+one read and written **atomically** (write temp file, `os.replace`). Phase 2a
+widens the value to carry the file's stored diagnostics alongside its
+`FileData` (e.g. `{abspath: (FileData, diags)}`).
 
 ### On permissions
 
