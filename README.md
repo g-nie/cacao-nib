@@ -10,10 +10,8 @@ so what runs is exactly what you list.
 
 Requires Python 3.14+.
 
-cacao-nib isn't on PyPI yet, so you can install it from GitHub:
-
 ```sh
-python -m pip install git+https://github.com/g-nie/cacao-nib.git
+python -m pip install cacao-nib
 ```
 
 ## Usage
