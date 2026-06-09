@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+
+    - name: Run pre-commit
+      run: uvx pre-commit run --all-files --show-diff-on-failure
+
+  build-package:
+    name: Build & inspect package
+    runs-on: ubuntu-latest
+    outputs:
+      # Derived from the Trove classifiers in pyproject.toml; free-threaded
+      # siblings (e.g. 3.14t) are added inline by include-free-threaded.
+      python-versions: ${{ steps.baipp.outputs.supported_python_classifiers_json_array }}
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: hynek/build-and-inspect-python-package@v2
+      id: baipp
+      with:
+        include-free-threaded: true
+
+  tests:
+    name: Python ${{ matrix.python-version }}
+    needs: build-package
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ${{ fromJSON(needs.build-package.outputs.python-versions) }}
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+
+    - name: Run tox targets for ${{ matrix.python-version }}
+      run: uvx --with tox-uv tox run -e py$(echo ${{ matrix.python-version }} | tr -d .)

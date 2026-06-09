@@ -1,0 +1,7 @@
+- id: nib
+  name: nib
+  description: Lint Python files with cacao-nib.
+  entry: nib check --force-exclude
+  language: python
+  types: [python]
+  require_serial: true

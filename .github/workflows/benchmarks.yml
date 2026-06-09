@@ -1,0 +1,92 @@
+name: benchmarks
+
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+
+concurrency:
+  group: bench-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  hyperfine:
+    name: hyperfine
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write  # github-action-benchmark pushes history to gh-pages
+    env:
+      DJANGO_REF: '6.0.5'  # Django release tag; bump to retarget the benchmark.
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+
+    - name: Install hyperfine + jq
+      run: sudo apt-get update && sudo apt-get install -y hyperfine jq
+
+    - name: Sync env
+      run: uv sync
+
+    # Pin a specific Django release tag so the benchmark target never drifts.
+    # Cache key is the tag, so this download only happens once per tag bump.
+    - name: Cache Django source
+      id: django-cache
+      uses: actions/cache@v4
+      with:
+        path: bench-targets/django
+        key: django-${{ env.DJANGO_REF }}
+
+    - name: Download Django source
+      if: steps.django-cache.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p bench-targets
+        curl -sL https://github.com/django/django/archive/refs/tags/${DJANGO_REF}.tar.gz \
+          | tar xz -C bench-targets
+        mv bench-targets/django-${DJANGO_REF} bench-targets/django
+
+    - name: Run hyperfine
+      run: |
+        # Two commands: caching off (full re-lint every run) and caching on
+        # (the cached run's own warmup populates the cache, so the measured runs
+        # are warm-cache replays). Plotted as two lines via their distinct names.
+        hyperfine --warmup 1 --runs 5 --shell=none -i \
+          --export-json bench.json \
+          'uv run nib check --no-cache --plugins bench.rules bench-targets/django' \
+          'uv run nib check --plugins bench.rules bench-targets/django'
+        jq '[
+          {
+            name: "nib check django (no cache)",
+            unit: "s",
+            value: .results[0].median,
+            range: .results[0].stddev
+          },
+          {
+            name: "nib check django (cached)",
+            unit: "s",
+            value: .results[1].median,
+            range: .results[1].stddev
+          }
+        ]' bench.json > processed.json
+
+    - uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: customSmallerIsBetter
+        output-file-path: processed.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        # Only update the gh-pages history when landing on main; PRs just compare.
+        auto-push: ${{ github.event_name == 'push' }}
+        alert-threshold: '120%'  # 1.2× the rolling baseline = regression.
+        comment-on-alert: true
+        # Block PR merge on regression, but never block a main push.
+        fail-on-alert: ${{ github.event_name == 'pull_request' }}
+        summary-always: true
