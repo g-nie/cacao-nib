@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781114582598,
+  "lastUpdate": 1781119289664,
   "repoUrl": "https://github.com/g-nie/cacao-nib",
   "entries": {
     "Benchmark": [
@@ -179,6 +179,42 @@ window.BENCHMARK_DATA = {
             "name": "nib check django (cached)",
             "value": 0.22593315400000002,
             "range": "0.0013034095362611422",
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "terzo.giannis@gmail.com",
+            "name": "Giannis Terzopoulos",
+            "username": "g-nie"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9bbfff0b031bca68d97a6ff15c943eaecd5de6c1",
+          "message": "Add per-module import table and resolve() to rules (#14)\n\nGive rules import-aware checks: `self.imports` is the current module's\n{local name -> fully-qualified origin} table, and `self.resolve(node)`\nqualifies a Name/Attribute chain through it (e.g. `np.array` -> \"numpy.array\").\n\nimplements #12",
+          "timestamp": "2026-06-10T21:20:45+02:00",
+          "tree_id": "6fd763687db7f103da0ac9c78fa50d33c019371d",
+          "url": "https://github.com/g-nie/cacao-nib/commit/9bbfff0b031bca68d97a6ff15c943eaecd5de6c1"
+        },
+        "date": 1781119289303,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "nib check django (no cache)",
+            "value": 2.583014823,
+            "range": "0.0068893997978989934",
+            "unit": "s"
+          },
+          {
+            "name": "nib check django (cached)",
+            "value": 0.22560642400000003,
+            "range": "0.0018056388983141746",
             "unit": "s"
           }
         ]
