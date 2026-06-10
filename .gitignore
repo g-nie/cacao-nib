@@ -55,7 +55,3 @@ docs/_build/
 
 # Pyenv
 .python-version
-
-# Tooling and caches
-.claude/
-.cacao_nib_cache/

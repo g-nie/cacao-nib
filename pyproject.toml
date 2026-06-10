@@ -45,6 +45,15 @@ dev = [
 [tool.hatch]
 build.targets.wheel.packages = [ "src/nib" ]
 build.targets.wheel.sources."src/nib" = "nib"
+build.targets.sdist.only-include = [
+  "src",
+  "tests",
+  "demo",
+  "bench",
+  "tox.ini",
+  "README.md",
+  "LICENSE",
+]
 
 [tool.ruff]
 extend-exclude = [ "demo/sample.py" ]
