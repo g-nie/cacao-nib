@@ -6,10 +6,13 @@ dispatch over a parsed module. `nib/__init__.py` re-exports them, so
 """
 
 import ast
+import contextvars
 import functools
 import importlib
+import importlib.util
 import sys
 import tomllib
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
@@ -29,6 +32,15 @@ def _warn(msg: str) -> None:
     """
     label = _color("nib warning:", "33", enabled=_color_enabled(sys.stderr))
     print(f"{label} {msg}", file=sys.stderr)
+
+
+# The current module's name->origin import table, live for the duration of the
+# walk. Kept here as shared per-run context rather than as state on Rule
+# instances, which are reused across every file. A ContextVar also keeps
+# concurrent `run` calls in the same interpreter isolated.
+_imports: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar(
+    "nib_imports", default={}
+)
 
 
 class Diagnostic:
@@ -63,6 +75,10 @@ class Rule:
     Optionally set `group` to opt rules into category-style selection
     (e.g. `--select DEMO` matches every rule with `group = "DEMO"`).
 
+    Inside a visitor, `self.resolve(node)` fully-qualifies a name/attribute via
+    the module's imports (e.g. `np.array` -> "numpy.array"), and `self.imports`
+    is the module-scope name->origin table.
+
     Example:
 
         class NoEval(Rule):
@@ -80,6 +96,36 @@ class Rule:
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         Rule._registry.append(cls)
+
+    @property
+    def imports(self) -> dict[str, str]:
+        """The current module's name->origin import table.
+
+        Only meaningful inside a visitor; empty outside a `run`. Module scope
+        only: function/class-local imports aren't tracked, and a local/param
+        that shadows an import name still resolves to the import anyway.
+        """
+        return _imports.get()
+
+    def resolve(self, node) -> str | None:
+        """Fully-qualify a Name/Attribute chain via the module's import table.
+
+        `np.array` -> "numpy.array" when `np` was imported as numpy; a bare
+        imported name resolves too (`c` -> "a.b.c"). Returns None when the head
+        name isn't an imported module or the chain isn't a plain Name/Attribute.
+        """
+        parts: list[str] = []
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if not isinstance(node, ast.Name):
+            return None
+        origin = self.imports.get(node.id)
+        if origin is None:
+            return None
+        parts.append(origin)
+        parts.reverse()
+        return ".".join(parts)
 
 
 def _rule_visitors(cls: type) -> dict[type, str]:
@@ -130,7 +176,83 @@ def _child_nodes(node):
     return children
 
 
-def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
+def _resolve_relative(*, package: str, level: int, module: str | None) -> str | None:
+    """Resolve a relative import's module path against the importer's `package`.
+    `level` is the leading-dot count and `module` the name after them.
+    Returns None when the import reaches beyond the top-level package."""
+    try:
+        return importlib.util.resolve_name("." * level + (module or ""), package)
+    except ImportError:  # reaches beyond the top-level package
+        return None
+
+
+def _module_package(file: Path) -> str | None:
+    """The `__package__` of the module in `file`, derived statically by walking
+    the directory tree: ascend while an `__init__.py` exists.
+    Returns None for a module not inside any package, so relative imports there
+    stay unresolved. PEP 420 namespace packages (no `__init__`) are a known gap,
+    their root is misdetected."""
+    parts: list[str] = []
+    d = file.parent
+    while (d / "__init__.py").is_file():
+        parts.append(d.name)
+        d = d.parent
+    if not parts:
+        return None
+    return ".".join(reversed(parts))
+
+
+def _collect_imports(module: ast.Module, file: Path) -> dict[str, str]:
+    """Flat module-scope import table: local name -> fully-qualified origin.
+
+    Module scope only — descends top-level blocks but stops at function and
+    class bodies (so function/class-local imports aren't tracked - known gap).
+    `file` resolves relative imports. Unresolvable relative imports are omitted."""
+
+    imports: dict[str, str] = {}
+    package: str | None = None
+    package_derived = False
+    queue = deque(module.body)
+    while queue:
+        node = queue.popleft()
+        t = type(node)
+        if t is ast.Import:
+            for a in node.names:
+                if a.asname:
+                    imports[a.asname] = a.name  # import a.b as c -> c: a.b
+                else:
+                    top = a.name.partition(".")[0]  # import a.b.c -> a: a
+                    imports[top] = top
+        elif t is ast.ImportFrom:
+            if node.level:  # relative
+                if not package_derived:  # stat the layout once, lazily
+                    package = _module_package(file)
+                    package_derived = True
+                if package is None:  # module isn't in a package -> unresolvable
+                    continue
+                base = _resolve_relative(
+                    package=package, level=node.level, module=node.module
+                )
+                if base is None:  # reaches beyond the top-level package
+                    continue
+            else:
+                base = node.module  # a non-relative `from` always names a module
+            for a in node.names:
+                if a.name != "*":
+                    imports[a.asname or a.name] = f"{base}.{a.name}"
+        elif t not in (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef):
+            queue.extend(
+                c
+                for c in ast.iter_child_nodes(node)
+                if isinstance(c, (ast.stmt, ast.excepthandler, ast.match_case))
+            )
+    return imports
+
+
+def run(module: ast.Module, rules: list[Rule], file: Path) -> list[Diagnostic]:
+    """Drive rule dispatch over `module`. `file` is the module's path on disk,
+    used to resolve relative imports for `Rule.resolve` (only touched if the
+    module actually has a relative import)."""
     results: list[Diagnostic] = []
 
     # Build visitors_by_node_type table once: ast_class -> [(rule, bound_fn, method_name), ...].
@@ -178,7 +300,13 @@ def run(module: ast.Module, rules: list[Rule]) -> list[Diagnostic]:
         for child in _child_nodes(node):
             walk(child)
 
-    walk(module)
+    # Expose this module's import table to `Rule.resolve`/`Rule.imports` for the
+    # duration of the walk only; then restore, so it never leaks past the run.
+    token = _imports.set(_collect_imports(module, file))
+    try:
+        walk(module)
+    finally:
+        _imports.reset(token)
     return results
 
 
@@ -283,7 +411,7 @@ def _check_file(file: Path, rules: list["Rule"]) -> tuple:
     except SyntaxError as e:
         err = FileError("syntax", e.msg, lineno=e.lineno or 1, offset=e.offset or 1)
         return file_str, source, (), tuple(err)
-    diags = run(mod, rules)
+    diags = run(mod, rules, file=file)
     diag_tuples = tuple(
         (d.lineno, d.col_offset, d.end_lineno, d.end_col_offset, d.message, d.code)
         for d in diags

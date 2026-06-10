@@ -414,3 +414,27 @@ def test_noqa_with_empty_colon_suppresses_nothing(run_cli, tmp_path):
     (tmp_path / "x.py").write_text("a  # noqa:\n")
     result = run_cli("check", "x.py", cwd=tmp_path)
     assert reported_codes(result.stdout) == {"AAA001", "AAA002", "BBB001"}
+
+
+def test_rule_may_resolve_import_forms(run_cli, tmp_path):
+    # DEMO010 (NoPickleLoads) uses `self.resolve`, so it should flag pickle's
+    # unsafe loaders through every import form, and leave `pickle.dumps` alone.
+    sample = tmp_path / "uses_pickle.py"
+    sample.write_text(
+        "import pickle\n"
+        "import pickle as p\n"
+        "from pickle import loads\n"
+        "\n"
+        "pickle.loads(b'')\n"  # line 5
+        "p.loads(b'')\n"  # line 6  (aliased module)
+        "loads(b'')\n"  # line 7  (from-import)
+        "pickle.load(f)\n"  # line 8
+        "pickle.dumps(x)\n"  # line 9  (safe - must not fire)
+    )
+    result = run_cli(
+        "check", str(sample), "--plugins", "demo.rules", "--select", "DEMO010"
+    )
+    assert result.returncode == 1
+    assert reported_codes(result.stdout) == {"DEMO010"}
+    linenos = sorted(int(line.split(":")[1]) for line in error_lines(result.stdout))
+    assert linenos == [5, 6, 7, 8]

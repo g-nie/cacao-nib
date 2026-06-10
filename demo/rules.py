@@ -138,3 +138,12 @@ class MaxParameters(Rule):
                     f"function {node.name!r} has {n} parameters, max {self.MAX}",
                 )
             ]
+
+
+class NoPickleLoads(Rule):
+    code = "DEMO010"
+    group = "DEMO"
+
+    def visit_Call(self, node):
+        if self.resolve(node.func) in {"pickle.loads", "pickle.load"}:
+            return [Diagnostic(node, "pickle.load(s) is unsafe on untrusted data")]

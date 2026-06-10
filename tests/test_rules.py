@@ -1,8 +1,14 @@
+from pathlib import Path
+
 import pytest
 
 import nib
 import nib.engine
 from nib import Diagnostic, ast
+
+# Placeholder path for tests that lint in-memory source with no relative imports,
+# so the file is never actually stat-walked (only relative imports trigger that).
+MODULE = Path("module.py")
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +48,7 @@ class ModuleVisitor(nib.Rule):
 
 def test_visitor_fires_on_matching_node():
     mod = nib.ast.parse("eval('x')\nprint('ok')\neval(y)\n")
-    diags = nib.run(mod, [NoEval()])
+    diags = nib.run(mod, [NoEval()], MODULE)
     assert len(diags) == 2
     assert all(isinstance(d, Diagnostic) for d in diags)
     assert [(d.code, d.message, d.lineno) for d in diags] == [
@@ -53,20 +59,20 @@ def test_visitor_fires_on_matching_node():
 
 def test_visitor_no_match():
     mod = nib.ast.parse("print('hi')\n")
-    diags = nib.run(mod, [NoEval()])
+    diags = nib.run(mod, [NoEval()], MODULE)
     assert diags == []
 
 
 def test_visitor_multiple_rules_distinct_codes():
     mod = nib.ast.parse("eval('x')\nprint('y')\n")
-    diags = nib.run(mod, [NoEval(), NoPrint()])
+    diags = nib.run(mod, [NoEval(), NoPrint()], MODULE)
     codes = sorted(d.code for d in diags)
     assert codes == ["X001", "X002"]
 
 
 def test_non_diagnostic_items_are_dropped_with_warning(capsys):
     mod = nib.ast.parse("eval(eval('x'))\n")
-    diags = nib.run(mod, [CountNames()])
+    diags = nib.run(mod, [CountNames()], MODULE)
     assert diags == []
     err = capsys.readouterr().err
     assert "CountNames.visit_Name" in err and "expected Diagnostic" in err
@@ -82,7 +88,7 @@ def test_single_diagnostic_return_wrapped_with_warning(capsys):
             return Diagnostic(node, "missing list")
 
     mod = nib.ast.parse("a; b\n")
-    diags = nib.run(mod, [BadReturn()])
+    diags = nib.run(mod, [BadReturn()], MODULE)
     assert len(diags) == 2
     assert all(d.code == "BAD" for d in diags)
     err = capsys.readouterr().err
@@ -97,7 +103,7 @@ def test_non_iterable_return_warns_and_skips(capsys):
             return 42  # not None, not a Diagnostic, not iterable
 
     mod = nib.ast.parse("a\n")
-    diags = nib.run(mod, [BadReturn()])
+    diags = nib.run(mod, [BadReturn()], MODULE)
     assert diags == []
     err = capsys.readouterr().err
     assert "BadReturn.visit_Name" in err and "non-iterable int" in err
@@ -105,7 +111,7 @@ def test_non_iterable_return_warns_and_skips(capsys):
 
 def test_visit_module_fires_once():
     mod = nib.ast.parse("eval(1)\neval(2)\n")
-    diags = nib.run(mod, [ModuleVisitor()])
+    diags = nib.run(mod, [ModuleVisitor()], MODULE)
     assert len(diags) == 1
     assert diags[0].code == "MOD"
     assert diags[0].message == "saw 2 statements"
@@ -113,7 +119,7 @@ def test_visit_module_fires_once():
 
 def test_diagnostic_span_pulled_from_node():
     mod = nib.ast.parse("x = eval('hi')\n")
-    diags = nib.run(mod, [NoEval()])
+    diags = nib.run(mod, [NoEval()], MODULE)
     assert len(diags) == 1
     d = diags[0]
     assert d.lineno == 1
@@ -132,6 +138,6 @@ def test_multiple_diagnostics_from_one_node():
             return [Diagnostic(arg, "arg") for arg in node.args]
 
     mod = nib.ast.parse("foo('a', 'b', 'c')\n")
-    diags = nib.run(mod, [FlagEachArg()])
+    diags = nib.run(mod, [FlagEachArg()], MODULE)
     assert len(diags) == 3
     assert all(d.code == "ARG" for d in diags)
