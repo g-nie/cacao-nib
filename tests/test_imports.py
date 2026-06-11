@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import nib
-import nib.engine
+import nib.analysis
 
 # Placeholder path for tests that lint in-memory source with no relative imports,
 # so the file is never actually stat-walked (only relative imports trigger that).
@@ -41,7 +41,7 @@ def test_import_origin_forms():
         "from x.y import z\n"
         "from x.y import w as v\n"
     )
-    assert nib.engine._collect_imports(nib.ast.parse(src), MODULE) == {
+    assert nib.analysis._collect_imports(nib.ast.parse(src), MODULE) == {
         "a": "a",
         "c": "a.b",
         "z": "x.y.z",
@@ -72,7 +72,7 @@ def test_top_level_compound_imports_are_collected():
         "except ImportError:\n"
         "    import slow as impl\n"
     )
-    table = nib.engine._collect_imports(nib.ast.parse(src), MODULE)
+    table = nib.analysis._collect_imports(nib.ast.parse(src), MODULE)
     assert table["b"] == "a.b"
     assert table["impl"] == "slow"  # last binding wins
 
@@ -159,6 +159,6 @@ def test_module_package_walks_init_files(tmp_path):
     (sub / "mod.py").write_text("")
     (tmp_path / "script.py").write_text("")
 
-    assert nib.engine._module_package(sub / "mod.py") == "proj.sub"
-    assert nib.engine._module_package(sub / "__init__.py") == "proj.sub"
-    assert nib.engine._module_package(tmp_path / "script.py") is None
+    assert nib.analysis._module_package(sub / "mod.py") == "proj.sub"
+    assert nib.analysis._module_package(sub / "__init__.py") == "proj.sub"
+    assert nib.analysis._module_package(tmp_path / "script.py") is None
