@@ -109,21 +109,8 @@ def test_imports_attribute_is_module_scope_only():
 # --- relative imports --------------------------------------------------------
 
 
-def _make_package(tmp_path, src):
-    """Write `src` to proj/sub/mod.py under an installed package layout and
-    return the module's path (so its `__package__` resolves to "proj.sub")."""
-    sub = tmp_path / "proj" / "sub"
-    sub.mkdir(parents=True)
-    (tmp_path / "proj" / "__init__.py").write_text("")
-    (sub / "__init__.py").write_text("")
-    mod = sub / "mod.py"
-    mod.write_text(src)
-    return mod
-
-
-def test_relative_imports_resolve_against_package(tmp_path):
-    mod = _make_package(
-        tmp_path,
+def test_relative_imports_resolve_against_package(make_package):
+    mod = make_package(
         "from . import sibling\n"
         "from ..pkg import thing\n"
         "from .other import func\n"
@@ -138,9 +125,9 @@ def test_relative_imports_resolve_against_package(tmp_path):
     ]
 
 
-def test_relative_beyond_top_level_is_unresolved(tmp_path):
+def test_relative_beyond_top_level_is_unresolved(make_package):
     # `from ...` is level 3, but proj.sub is only 2 deep -> beyond top-level.
-    mod = _make_package(tmp_path, "from ... import x\nx()\n")
+    mod = make_package("from ... import x\nx()\n")
     assert _resolved_in(mod) == [None]
 
 

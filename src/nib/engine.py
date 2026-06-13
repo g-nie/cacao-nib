@@ -14,7 +14,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from nib.analysis import _collect_imports, _imports
+from nib.analysis import (
+    _collect_imports,
+    _collect_import_targets,
+    _file,
+    _imports,
+    _module_name,
+)
 from nib.output import _color, _color_enabled
 
 
@@ -54,6 +60,55 @@ class Diagnostic:
         self.code = ""
 
 
+class DeferredDiagnostic:
+    """A diagnostic whose emission hinges on cross-file reachability, decided only
+    after the whole run is walked.
+
+    A cross-file rule returns these from its visitors instead of querying an index
+    inline (the import picture isn't complete mid-walk). Constructed just like a
+    `Diagnostic` — `node` and `message` — plus `module`, the dotted name whose
+    reachability gates the finding. Don't construct this base directly — use one of
+    the two concrete subclasses, which fix the polarity: `UnimportedDiagnostic`
+    (the orphan case) emits only if `module` is imported nowhere in scope;
+    `ImportedDiagnostic` emits only if something imports it. The polarity is a
+    plain bool on the class, not a closure, so it survives the trip back from a
+    worker subinterpreter.
+    """
+
+    __slots__ = ("diagnostic", "module")
+
+    # The reachability state `module` must be in for the finding to survive:
+    # True = keep when imported, False = keep when imported nowhere. Set by the
+    # two concrete subclasses below.
+    keep_when_imported: bool
+
+    def __init__(self, node, message: str, module: str):
+        self.diagnostic = Diagnostic(node, message)
+        self.module = module
+
+
+class UnimportedDiagnostic(DeferredDiagnostic):
+    """A deferred finding that emits only if `module` is imported nowhere in
+    scope — the orphan case (e.g. a plugin entry point nobody imports)."""
+
+    __slots__ = ()
+    keep_when_imported = False
+
+
+class ImportedDiagnostic(DeferredDiagnostic):
+    """A deferred finding that emits only if something in scope imports `module`."""
+
+    __slots__ = ()
+    keep_when_imported = True
+
+
+def _keep_deferred(module: str, keep_when_imported: bool, imported_set) -> bool:
+    """Whether a deferred finding survives: `module`'s actual reachability must
+    match the polarity the finding fires on (`keep_when_imported`)."""
+    is_imported = module in imported_set
+    return is_imported == keep_when_imported
+
+
 class Rule:
     """Subclass and define `visit_<AstName>` methods that return a list of
     `Diagnostic`s (or None for "no findings").
@@ -67,6 +122,10 @@ class Rule:
     Inside a visitor, `self.resolve(node)` fully-qualifies a name/attribute via
     the module's imports (e.g. `np.array` -> "numpy.array"), and `self.imports`
     is the module-scope name->origin table.
+
+    For cross-file rules, return deferred diagnostics gated on `self.module`'s
+    reachability (see `UnimportedDiagnostic`/`ImportedDiagnostic`);
+    nib resolves them once the whole run is walked.
 
     Example:
 
@@ -95,6 +154,14 @@ class Rule:
         that shadows an import name still resolves to the import anyway.
         """
         return _imports.get()
+
+    @property
+    def module(self) -> str | None:
+        """The current file's dotted module name (e.g. "pkg.plugin"). Pass it (or
+        a dotted path built from it) to a `DeferredDiagnostic` to gate a cross-file
+        finding on that module's/function's reachability. None outside a run."""
+        file = _file.get()
+        return _module_name(file) if file is not None else None
 
     def resolve(self, node) -> str | None:
         """Fully-qualify a Name/Attribute chain via the module's import table.
@@ -165,11 +232,16 @@ def _child_nodes(node):
     return children
 
 
-def run(module: ast.Module, rules: list[Rule], file: Path) -> list[Diagnostic]:
-    """Drive rule dispatch over `module`. `file` is the module's path on disk,
-    used to resolve relative imports for `Rule.resolve` (only touched if the
-    module actually has a relative import)."""
+def _run(
+    module: ast.Module, rules: list[Rule], file: Path
+) -> tuple[list[Diagnostic], list[DeferredDiagnostic]]:
+    """Drive rule dispatch over `module`, returning `(immediate, deferred)`:
+    plain `Diagnostic`s emitted directly, and `DeferredDiagnostic`s whose verdict
+    waits on whole-run reachability. `file` resolves relative imports for
+    `Rule.resolve` and derives `Rule.module` (only stat-walked if a rule reads
+    them)."""
     results: list[Diagnostic] = []
+    deferred: list[DeferredDiagnostic] = []
 
     # Build visitors_by_node_type table once: ast_class -> [(rule, bound_fn, method_name), ...].
     # Per-node lookup becomes one dict.get plus only the relevant visitors;
@@ -189,9 +261,9 @@ def run(module: ast.Module, rules: list[Rule], file: Path) -> list[Diagnostic]:
                 if out is None:
                     continue
                 cls_name = type(rule).__name__
-                if isinstance(out, Diagnostic):
+                if isinstance(out, (Diagnostic, DeferredDiagnostic)):
                     _warn(
-                        f"{cls_name}.{method} returned a single Diagnostic; "
+                        f"{cls_name}.{method} returned a single {type(out).__name__}; "
                         "wrap it in a list"
                     )
                     out = [out]
@@ -205,24 +277,50 @@ def run(module: ast.Module, rules: list[Rule], file: Path) -> list[Diagnostic]:
                     continue
                 rule_code = getattr(type(rule), "code", "")
                 for item in items:
-                    if not isinstance(item, Diagnostic):
+                    if isinstance(item, Diagnostic):
+                        item.code = rule_code
+                        results.append(item)
+                    elif isinstance(item, DeferredDiagnostic):
+                        item.diagnostic.code = rule_code
+                        deferred.append(item)
+                    else:
                         _warn(
                             f"{cls_name}.{method} returned list contained "
                             f"{type(item).__name__}; expected Diagnostic (dropped)"
                         )
-                        continue
-                    item.code = rule_code
-                    results.append(item)
         for child in _child_nodes(node):
             walk(child)
 
-    # Expose this module's import table to `Rule.resolve`/`Rule.imports` for the
-    # duration of the walk only; then restore, so it never leaks past the run.
-    token = _imports.set(_collect_imports(module, file))
+    # Expose this run's context (import table, file) to the rule properties for
+    # the duration of the walk only; then restore, so none of it leaks past it.
+    import_token = _imports.set(_collect_imports(module, file))
+    file_token = _file.set(file)
     try:
         walk(module)
     finally:
-        _imports.reset(token)
+        _imports.reset(import_token)
+        _file.reset(file_token)
+    return results, deferred
+
+
+def run(
+    module: ast.Module,
+    rules: list[Rule],
+    file: Path,
+    imported: frozenset[str] | None = None,
+) -> list[Diagnostic]:
+    """Drive rule dispatch over `module` and return all `Diagnostic`s, resolving
+    any `DeferredDiagnostic`s against `imported` — the set of reachable module
+    names (None means "nothing imported", so `imported=False` conditions fire).
+    The single-pass CLI defers resolution to the main process instead; this keeps
+    direct callers and tests simple."""
+    results, deferred = _run(module, rules, file)
+    imported = imported or frozenset()
+    results.extend(
+        d.diagnostic
+        for d in deferred
+        if _keep_deferred(d.module, d.keep_when_imported, imported)
+    )
     return results
 
 
@@ -304,32 +402,41 @@ class FileError(NamedTuple):
     exc_type: str | None = None  # read only
 
 
+def _diag_wire(d: Diagnostic) -> tuple:
+    """The shareable tuple form of a `Diagnostic` (it can't cross a subinterpreter
+    boundary as an instance — each interpreter has its own `Diagnostic` class)."""
+    return (d.lineno, d.col_offset, d.end_lineno, d.end_col_offset, d.message, d.code)
+
+
 def _check_file(file: Path, rules: list["Rule"]) -> tuple:
-    """Parse and lint `file`. Returns `(file_str, source, diag_tuples, err)`.
+    """Parse and lint `file`. Returns
+    `(file_str, source, diag_tuples, err, target_tuple, deferred_tuples)`.
 
-    Workers run in subinterpreters, each with its own `Diagnostic` class, so a
-    `Diagnostic` instance can't be shipped back over the queue. We return plain
-    tuples of shareable primitives instead, so the same code path works in the
-    main interpreter and in a worker.
+    Workers run in subinterpreters, each with its own classes, so nothing is
+    shipped back as an instance — we return plain tuples of primitives, so the
+    same code path works in the main interpreter and in a worker.
 
-    `diag_tuples` is `tuple[(lineno, col, end_lineno, end_col, message, code)]`.
-    `err` is `None` on success, otherwise the wire form of a `FileError`
-    (`tuple(FileError(...))`); rebuild it with `FileError(*err)`.
-    """
+    `diag_tuples` is the wire form of the immediate diagnostics. `deferred_tuples`
+    is `tuple[(*diag_wire, module, keep_when_imported)]` — findings whose verdict
+    the main process resolves once it knows the project's reachable set.
+    `target_tuple` is this file's import targets, fed into that reachability set.
+    `err` is `None` on success, else the wire form of a `FileError` (rebuild with
+    `FileError(*err)`)."""
     file_str = str(file)
     try:
         source = file.read_text()
     except (OSError, UnicodeDecodeError) as e:
         err = FileError("read", str(e), exc_type=type(e).__name__)
-        return file_str, None, (), tuple(err)
+        return file_str, None, (), tuple(err), (), ()
     try:
         mod = ast.parse(source)
     except SyntaxError as e:
         err = FileError("syntax", e.msg, lineno=e.lineno or 1, offset=e.offset or 1)
-        return file_str, source, (), tuple(err)
-    diags = run(mod, rules, file=file)
-    diag_tuples = tuple(
-        (d.lineno, d.col_offset, d.end_lineno, d.end_col_offset, d.message, d.code)
-        for d in diags
+        return file_str, source, (), tuple(err), (), ()
+    diags, deferred = _run(mod, rules, file=file)
+    diag_tuples = tuple(_diag_wire(d) for d in diags)
+    deferred_tuples = tuple(
+        (*_diag_wire(d.diagnostic), d.module, d.keep_when_imported) for d in deferred
     )
-    return file_str, source, diag_tuples, None
+    targets = tuple(_collect_import_targets(mod, file))
+    return file_str, source, diag_tuples, None, targets, deferred_tuples

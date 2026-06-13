@@ -1,10 +1,14 @@
+import os
+from pathlib import Path
+
 from helpers import error_lines, noqa_plugin, reported_codes, three_rule_plugin
 
 
 def test_check_dir_with_demo_plugin_flags_all_demo_codes(run_cli):
     result = run_cli("check", "demo", "--plugins", "demo.rules")
     assert result.returncode == 1
-    # All five demo rules fire on demo/sample.py.
+    # Every demo rule except DEMO010 (pickle) fires on demo/sample.py — including
+    # the cross-file DEMO011, since nothing imports its `setup`.
     codes = {
         line.split(" error[")[1].split("]")[0]
         for line in result.stdout.splitlines()
@@ -20,6 +24,7 @@ def test_check_dir_with_demo_plugin_flags_all_demo_codes(run_cli):
         "DEMO007",
         "DEMO008",
         "DEMO009",
+        "DEMO011",
     }
 
 
@@ -42,7 +47,10 @@ def test_check_single_file_full_output(run_cli):
         "— split it",
         "demo/sample.py:38:1: error[DEMO009] function 'configure' has 7 parameters, "
         "max 5",
-        "Found 10 issues.",
+        # DEMO011 is cross-file (deferred), so it prints after the immediate
+        # findings rather than sorted in at line 33.
+        "demo/sample.py:33:1: error[DEMO011] sample.setup is never imported",
+        "Found 11 issues.",
     ]
 
 
@@ -438,3 +446,57 @@ def test_rule_may_resolve_import_forms(run_cli, tmp_path):
     assert reported_codes(result.stdout) == {"DEMO010"}
     linenos = sorted(int(line.split(":")[1]) for line in error_lines(result.stdout))
     assert linenos == [5, 6, 7, 8]
+
+
+def _setup_project(tmp_path, *, imported: bool):
+    """A package whose plugin.py defines a `setup()` entry point; main.py imports
+    that function by name only when `imported`."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "__init__.py").write_text("")
+    (proj / "plugin.py").write_text("def setup():\n    pass\n")
+    body = "from proj.plugin import setup\n" if imported else "pass\n"
+    (proj / "main.py").write_text(f"def run():\n    {body}")
+    return proj
+
+
+def test_cross_file_rule_flags_unimported_setup(run_cli, tmp_path):
+    # DEMO011 fires when `proj.plugin.setup` is imported by name nowhere.
+    proj = _setup_project(tmp_path, imported=False)
+    result = run_cli(
+        "check", str(proj), "--plugins", "demo.rules", "--select", "DEMO011"
+    )
+    assert result.returncode == 1
+    assert reported_codes(result.stdout) == {"DEMO011"}
+    # The finding is on plugin.py (where setup is defined), not main.py.
+    assert all("plugin.py" in line for line in error_lines(result.stdout))
+    # A cross-file run is cacheable now (no decorator, no cache opt-out).
+    assert list(Path(os.environ["NIB_CACHE_DIR"]).rglob("cache.*.pickle")) != []
+
+
+def test_cross_file_rule_silent_when_setup_imported(run_cli, tmp_path):
+    proj = _setup_project(tmp_path, imported=True)
+    result = run_cli(
+        "check", str(proj), "--plugins", "demo.rules", "--select", "DEMO011"
+    )
+    assert result.returncode == 0
+    assert reported_codes(result.stdout) == set()
+
+
+def test_cross_file_verdict_reresolved_over_warm_cache(run_cli, tmp_path):
+    # The orphan fires, then a *second* file adds the import without touching the
+    # function's file. On the warm cache plugin.py is a hit, yet its verdict must
+    # flip to silent — proving deferred findings are re-resolved every run from
+    # the cached import targets rather than replayed stale.
+    proj = _setup_project(tmp_path, imported=False)
+    cmd = ("check", str(proj), "--plugins", "demo.rules", "--select", "DEMO011")
+
+    first = run_cli(*cmd)
+    assert first.returncode == 1
+    assert reported_codes(first.stdout) == {"DEMO011"}
+
+    # main.py now imports setup; plugin.py is unchanged (warm hit).
+    (proj / "main.py").write_text("def run():\n    from proj.plugin import setup\n")
+    second = run_cli(*cmd)
+    assert second.returncode == 0
+    assert reported_codes(second.stdout) == set()
