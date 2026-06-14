@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781120200834,
+  "lastUpdate": 1781446211793,
   "repoUrl": "https://github.com/g-nie/cacao-nib",
   "entries": {
     "Benchmark": [
@@ -251,6 +251,42 @@ window.BENCHMARK_DATA = {
             "name": "nib check django (cached)",
             "value": 0.231171427,
             "range": "0.0010891465768254052",
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "terzo.giannis@gmail.com",
+            "name": "Giannis Terzopoulos",
+            "username": "g-nie"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "261d35f1df7f8dbd9643433de810b47ef4ab1261",
+          "message": "Add cross-file rules via deferred diagnostics  (#16)",
+          "timestamp": "2026-06-14T16:09:21+02:00",
+          "tree_id": "388c6ddcb514913a9098b236d39347077e0776d2",
+          "url": "https://github.com/g-nie/cacao-nib/commit/261d35f1df7f8dbd9643433de810b47ef4ab1261"
+        },
+        "date": 1781446210918,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "nib check django (no cache)",
+            "value": 2.877560451,
+            "range": "0.02812569303392185",
+            "unit": "s"
+          },
+          {
+            "name": "nib check django (cached)",
+            "value": 0.22845119600000002,
+            "range": "0.0013410470139431359",
             "unit": "s"
           }
         ]
