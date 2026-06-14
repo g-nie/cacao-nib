@@ -133,7 +133,7 @@ nib ships a [pre-commit](https://pre-commit.com) hook. Add to your `.pre-commit-
 ```yaml
 repos:
   - repo: https://github.com/g-nie/cacao-nib
-    rev: v0.1.1
+    rev: v0.2.0
     hooks:
       - id: nib
 ```
