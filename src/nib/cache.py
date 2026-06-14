@@ -2,10 +2,16 @@
 
 Much inspired by Black's cache (https://github.com/psf/black/blob/main/src/black/cache.py)
 
-Each entry pairs a file's `FileData` (the staleness key) with the diagnostics it
-emitted last time. On an unchanged re-run the findings are identical, so we replay
-the stored diagnostics instead of re-parsing the file. A clean file just stores an
-empty diagnostic list.
+The lookup is two-part. The nib version and enabled rule set pick the cache *file*
+(`<base>/<version>/cache.<ruleset>.pickle`, see `cache_file`/`ruleset_hash`), so a
+different version or `--select`/`--ignore`/plugin set never reads another's hits.
+Within that file, a key is the file's absolute path and the value its `Entry`; a
+hit counts only if `FileData` (size, then mtime, then hash) says it's unchanged.
+
+Each entry pairs that `FileData` with the diagnostics the file emitted last time.
+On an unchanged re-run the findings are identical, so we replay the stored
+diagnostics instead of re-parsing the file. A clean file just stores an empty
+diagnostic list.
 """
 
 import contextlib
@@ -26,6 +32,13 @@ DEFAULT_CACHE_DIR = ".cacao_nib_cache"
 # re-print the exact `path:line:col` line on a cache hit without re-parsing.
 Diag = tuple[int, int, str, str]
 
+# A noqa-filtered deferred finding: a `Diag` plus the dotted module it depends on
+# and whether it fires when that module is imported (vs. imported nowhere). Its
+# verdict is re-resolved every run (against the project's imported set), so caching
+# it can't go stale when some *other* file's imports change.
+# Print it via its first four fields; re-resolve via the last two.
+DeferredDiag = tuple[int, int, str, str, str, bool]
+
 
 class FileData(NamedTuple):
     st_mtime: float
@@ -33,8 +46,9 @@ class FileData(NamedTuple):
     hash: str  # sha256 hex of the file's bytes
 
 
-# Cache value: the staleness key plus the diagnostics to replay on a hit.
-Entry = tuple[FileData, tuple[Diag, ...]]
+# Cache value: the staleness key, the immediate diagnostics to replay on a hit,
+# the file's import targets, and its (unresolved) deferred findings.
+Entry = tuple[FileData, tuple[Diag, ...], tuple[str, ...], tuple[DeferredDiag, ...]]
 Cache = dict[str, Entry]
 
 
@@ -118,22 +132,34 @@ def is_changed(path: str, cache: Cache) -> bool:
     return _hash(path) != file_data.hash
 
 
-def lookup(path: str, cache: Cache) -> tuple[Diag, ...] | None:
-    """A cache hit returns the file's stored diagnostics to replay (an empty
-    tuple for a file that linted clean); a miss or a changed file returns
+def lookup(
+    path: str, cache: Cache
+) -> tuple[tuple[Diag, ...], tuple[str, ...], tuple[DeferredDiag, ...]] | None:
+    """A cache hit returns `(diags, targets, deferred)` to replay/re-resolve
+    (empty tuples for a file that linted clean); a miss or a changed file returns
     `None`, meaning the caller must actually check it."""
     if is_changed(path, cache):
         return None
-    return cache[os.path.abspath(path)][1]
+    entry = cache[os.path.abspath(path)]
+    return entry[1], entry[2], entry[3]
 
 
-def record(path: str, cache: Cache, diags: tuple[Diag, ...]) -> None:
-    """Store `path`'s current `FileData` and the diagnostics it just emitted
-    (empty for a clean file), so an unchanged re-run can replay them."""
+def record(
+    path: str,
+    cache: Cache,
+    diags: tuple[Diag, ...],
+    targets: tuple[str, ...],
+    deferred: tuple[DeferredDiag, ...],
+) -> None:
+    """Store `path`'s current `FileData` alongside the immediate diagnostics it
+    emitted, its import targets, and its (unresolved) deferred findings, so an
+    unchanged re-run can replay them and re-resolve the deferred verdicts."""
     st = os.stat(path)
     cache[os.path.abspath(path)] = (
         FileData(st.st_mtime, st.st_size, _hash(path)),
         tuple(diags),
+        tuple(targets),
+        tuple(deferred),
     )
 
 
@@ -191,25 +217,46 @@ class Session:
 
     def partition(
         self, files: list[Path]
-    ) -> tuple[dict[str, tuple[Diag, ...]], list[Path]]:
-        """Split `files` into `({file_str: diags-to-replay}, [files-to-check])`.
-        With caching off, every file is a miss."""
+    ) -> tuple[
+        dict[str, tuple[tuple[Diag, ...], tuple[str, ...], tuple[DeferredDiag, ...]]],
+        list[Path],
+    ]:
+        """Split `files` into `({file_str: (diags, targets, deferred)}, [misses])`.
+        A hit carries its import targets and deferred findings too, so the run can
+        re-resolve cross-file verdicts without re-reading the file. With caching
+        off, every file is a miss."""
         if self._path is None:
             return {}, files
-        hits: dict[str, tuple[Diag, ...]] = {}
+        hits: dict[
+            str, tuple[tuple[Diag, ...], tuple[str, ...], tuple[DeferredDiag, ...]]
+        ] = {}
         misses: list[Path] = []
         for f in files:
-            diags = lookup(str(f), self._data)
-            if diags is None:
+            hit = lookup(str(f), self._data)
+            if hit is None:
                 misses.append(f)
             else:
-                hits[str(f)] = diags
+                hits[str(f)] = hit
         return hits, misses
 
-    def record(self, file_str: str, diags: tuple[Diag, ...]) -> None:
-        """Remember a just-checked file's emitted diagnostics for next run."""
+    def record(
+        self,
+        file_str: str,
+        diags: tuple[Diag, ...],
+        targets: tuple[str, ...],
+        deferred: tuple[DeferredDiag, ...],
+    ) -> None:
+        """Remember a just-checked file's diagnostics, import targets, and deferred
+        findings for next run."""
         if self._path is not None:
-            record(file_str, self._data, diags)
+            record(file_str, self._data, diags, targets, deferred)
+
+    def cached_targets(self, path: str) -> tuple[str, ...] | None:
+        """This file's cached import targets if it's an unchanged hit, else None,
+        so the reachability scan can reuse a prior run's parse for a file it isn't
+        re-checking. Always None when caching is off."""
+        hit = lookup(path, self._data)
+        return None if hit is None else hit[1]
 
     def flush(self) -> None:
         """Persist the cache to disk (no-op when disabled)."""

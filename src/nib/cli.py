@@ -9,7 +9,16 @@ import sys
 from pathlib import Path
 
 from nib import Rule, cache, parallel
-from nib.engine import FileError, _check_file, _find_config, _select_rules, _warn
+from nib.analysis import imported_among
+from nib.engine import (
+    FileError,
+    _check_file,
+    _file_targets,
+    _find_config,
+    _keep_deferred,
+    _select_rules,
+    _warn,
+)
 from nib.output import _color, _color_enabled
 
 # Exit codes
@@ -341,76 +350,154 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _emit_result(result: tuple) -> list[cache.Diag] | None:
-    """Print whatever `_check_file` produced and return the emitted diagnostics
-    as `(lineno, col, code, message)` tuples — its length is the issue count,
-    and it's what gets cached for replay on an unchanged re-run. Returns `None`
-    for a read error (nothing worth caching; we re-attempt the read next run)."""
-    file_str, source, diag_tuples, err_wire = result
+def _is_suppressed(
+    lineno: int, code: str, suppressions: dict[int, set[str] | None]
+) -> bool:
+    """Whether a `# noqa` on `lineno` silences `code` (blanket, or code listed)."""
+    if lineno not in suppressions:
+        return False
+    codes = suppressions[lineno]
+    return codes is None or code in codes
+
+
+def _process_checked(
+    result: tuple,
+) -> tuple[list[cache.Diag], tuple[str, ...], list[cache.DeferredDiag]] | None:
+    """Turn a `_check_file` result into `(diags, targets, deferred)` — its
+    immediate diagnostics and deferred findings post-`# noqa`, plus the file's
+    import targets. That triple is exactly what gets cached and what the run
+    emits/resolves. Prints nothing except a read-error notice"""
+    file_str, source, diag_tuples, err_wire, targets, deferred_tuples = result
     if err_wire is not None:
         err = FileError(*err_wire)
         if err.kind == "syntax":
-            _print_diagnostic(
-                file_str, err.lineno, err.offset, "invalid-syntax", err.message
-            )
-            return [(err.lineno, err.offset, "invalid-syntax", err.message)]
+            return [(err.lineno, err.offset, "invalid-syntax", err.message)], (), []
         # err.kind == "read"
         print(f"{file_str}: skipped ({err.exc_type}: {err.message})", file=sys.stderr)
         return None
     suppressions = _parse_line_suppressions(source) if source else {}
-    emitted: list[cache.Diag] = []
-    for lineno, col, _end_lineno, _end_col, message, code in diag_tuples:
-        if lineno in suppressions:
-            codes = suppressions[lineno]
-            if codes is None or code in codes:  # blanket, or this code listed
-                continue
-        _print_diagnostic(file_str, lineno, col, code, message)
-        emitted.append((lineno, col, code, message))
-    return emitted
+    diags = [
+        (lineno, col, code, message)
+        for lineno, col, _el, _ec, message, code in diag_tuples
+        if not _is_suppressed(lineno, code, suppressions)
+    ]
+    deferred = [
+        (lineno, col, code, message, module, keep)
+        for lineno, col, _el, _ec, message, code, module, keep in deferred_tuples
+        if not _is_suppressed(lineno, code, suppressions)
+    ]
+    return diags, targets, deferred
 
 
-def _replay(file_str: str, diags: tuple[cache.Diag, ...]) -> int:
-    """Re-print a cache hit's stored diagnostics without re-parsing the file.
-    Returns the issue count, which is just how many diagnostics were stored."""
+def _emit_diags(file_str: str, diags) -> int:
+    """Print each `(lineno, col, code, message)` for `file_str` and return the
+    count — renders freshly-checked files, cache hits, and surviving deferred
+    findings alike."""
     for lineno, col, code, message in diags:
         _print_diagnostic(file_str, lineno, col, code, message)
     return len(diags)
+
+
+_FILES_PER_WORKER = 50
+
+
+def _worker_count(files) -> int:
+    """How many subinterpreter workers to use for `files`: scale with the file
+    count but only once there's enough work to justify the startup cost, capped
+    at `_max_workers()`. 1 means run serially in-process."""
+    chunks = len(files) // _FILES_PER_WORKER
+    return min(_max_workers(), chunks) if chunks > 1 else 1
 
 
 def _dispatch_checks(files, rules, plugins, select, ignore):
     """Yield `_check_file` results for `files`: across subinterpreters when
     there's enough work to justify their startup cost, else serially in-process.
     Either way results come back in `files` order."""
-    _FILES_PER_WORKER = 50
-    chunks = len(files) // _FILES_PER_WORKER
-    n_workers = min(_max_workers(), chunks) if chunks > 1 else 1
+    n_workers = _worker_count(files)
     if n_workers > 1:
         return parallel._run_parallel(files, n_workers, plugins, select, ignore)
     return (_check_file(f, rules) for f in files)
 
 
-def _emit_in_order(files, cache_hits, results, session: cache.Session) -> int:
-    """Walk `files` in order, emitting as we go: replay a cache hit inline, else
-    pull the next checked result (the pipeline yields misses in the same order
-    they appear in `files`, so they line up). Records each checked file's
-    diagnostics in `session`. Returns the total issue count.
+def _emit(
+    files, cache_hits, results, session: cache.Session
+) -> tuple[int, list[tuple[str, ...]], list[tuple[str, list[cache.DeferredDiag]]]]:
+    """Walk `files` in order: replay a cache hit inline, else pull the next
+    checked result (misses arrive in `files` order). Immediate findings stream as
+    we go and each file's `(diags, targets, deferred)` is recorded for next run.
 
-    `closing` matters for the parallel branch: we pull exactly one result per
-    miss and never exhaust it to `StopIteration`, so closing the generator is
-    what runs its cleanup code (releasing the worker subinterpreters)."""
+    Returns `(issues, targets_per_file, deferred_holds)`. Deferred findings aren't
+    resolved here — the caller does that via `_resolve_deferred` once it has the
+    project-wide import picture, since a finding may hinge on a file `files`
+    doesn't include.
+
+    `closing` matters for the parallel branch: we pull one result per miss and
+    never exhaust the generator, so closing it runs the cleanup that releases the
+    worker subinterpreters."""
     issues = 0
+    targets_per_file: list[tuple[str, ...]] = []
+    deferred_holds: list[tuple[str, list[cache.DeferredDiag]]] = []
     with contextlib.closing(results):
         miss_results = iter(results)
         for f in files:
             file_str = str(f)
             if file_str in cache_hits:
-                issues += _replay(file_str, cache_hits[file_str])
+                diags, targets, deferred = cache_hits[file_str]
+            else:
+                processed = _process_checked(next(miss_results))
+                if processed is None:  # read error - not cacheable
+                    continue
+                diags, targets, deferred = processed
+                session.record(file_str, tuple(diags), targets, tuple(deferred))
+            issues += _emit_diags(file_str, diags)
+            targets_per_file.append(targets)
+            if deferred:
+                deferred_holds.append((file_str, deferred))
+    return issues, targets_per_file, deferred_holds
+
+
+def _package_scan_root(path: Path) -> Path:
+    """The directory to scan for reachability when `path` is linted: ascend out of
+    any enclosing package to its parent, so a file deep in `pkg/sub/` resolves
+    against the whole `pkg` tree. A path outside a package scans its own dir."""
+    directory = path if path.is_dir() else path.parent
+    while (directory / "__init__.py").is_file():
+        directory = directory.parent
+    return directory
+
+
+def _reachability_targets(
+    paths: list[Path], checked: set[str], session: cache.Session, force_exclude: bool
+) -> list[tuple[str, ...]]:
+    """Import targets for every project file *outside* `checked`, so a deferred
+    verdict resolves against the whole project, not just the files passed. Scans
+    the package tree(s) enclosing the path arguments, reusing cached targets for
+    unchanged files and parsing the rest fresh (no rules run)."""
+    extra: list[tuple[str, ...]] = []
+    seen = set(checked)
+    for root in {_package_scan_root(p) for p in paths}:
+        for f in _collect_py_files(root, force_exclude=force_exclude):
+            abspath = os.path.abspath(str(f))
+            if abspath in seen:
                 continue
-            emitted = _emit_result(next(miss_results))
-            if emitted is None:  # read error - not cacheable
-                continue
-            issues += len(emitted)
-            session.record(file_str, tuple(emitted))
+            seen.add(abspath)
+            targets = session.cached_targets(str(f))
+            extra.append(_file_targets(f) if targets is None else targets)
+    return extra
+
+
+def _resolve_deferred(
+    deferred_holds: list[tuple[str, list[cache.DeferredDiag]]],
+    reachable: list[tuple[str, ...]],
+) -> int:
+    """Resolve held deferred findings against `reachable` (every project file's
+    import targets) and print the survivors in file order. Returns the count."""
+    gated = {d[4] for _f, deferred in deferred_holds for d in deferred}
+    imported = imported_among(gated, reachable)
+    issues = 0
+    for file_str, deferred in deferred_holds:
+        survivors = [d[:4] for d in deferred if _keep_deferred(d[4], d[5], imported)]
+        issues += _emit_diags(file_str, survivors)
     return issues
 
 
@@ -489,17 +576,26 @@ def _run_cli() -> int:
     # Result cache: replay stored diagnostics for files unchanged since last run
     # and only actually check the misses. The session is keyed by nib version +
     # enabled rule set, so a different ruleset never reads another's hits. The
-    # default cache lives under the project root.
+    # default cache lives under the project root. It also keeps each file's import
+    # targets, which the reachability scan reuses to resolve cross-file findings
+    # without re-parsing unchanged files.
     session = cache.Session.open(
-        selected,
-        args.cache_dir,
-        enabled=not args.no_cache,
-        root=root,
+        selected, args.cache_dir, enabled=not args.no_cache, root=root
     )
     cache_hits, cache_misses = session.partition(files)
 
     results = _dispatch_checks(cache_misses, rules, plugins, select, ignore)
-    issues = _emit_in_order(files, cache_hits, results, session)
+    issues, targets_per_file, deferred_holds = _emit(
+        files, cache_hits, results, session
+    )
+    if deferred_holds:
+        # A cross-file rule fired: resolve its findings against the whole project,
+        # not just the files passed this run — scan the enclosing package tree(s)
+        # for the imports those verdicts hinge on (cheap, and skipped when no
+        # deferred finding is held).
+        checked = {os.path.abspath(str(f)) for f in files}
+        extra = _reachability_targets(args.paths, checked, session, args.force_exclude)
+        issues += _resolve_deferred(deferred_holds, targets_per_file + extra)
     session.flush()
 
     print(f"Found {issues} issue{'s' if issues != 1 else ''}.")

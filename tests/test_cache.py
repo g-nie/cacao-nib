@@ -15,7 +15,7 @@ def test_recorded_then_untouched_is_unchanged(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("x = 1\n")
     c: dict = {}
-    cache.record(str(f), c, ())
+    cache.record(str(f), c, (), (), ())
     assert cache.is_changed(str(f), c) is False  # fast path: mtime matches
 
 
@@ -23,7 +23,7 @@ def test_size_differs_is_changed(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("x = 1\n")
     c: dict = {}
-    cache.record(str(f), c, ())
+    cache.record(str(f), c, (), (), ())
     f.write_text("x = 123456\n")  # longer → size mismatch, no read needed
     assert cache.is_changed(str(f), c) is True
 
@@ -34,7 +34,7 @@ def test_mtime_bumped_same_bytes_is_unchanged(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("x = 1\n")
     c: dict = {}
-    cache.record(str(f), c, ())
+    cache.record(str(f), c, (), (), ())
     st = os.stat(f)
     os.utime(f, (st.st_atime, st.st_mtime + 100))  # bump mtime, same bytes
     assert cache.is_changed(str(f), c) is False
@@ -44,7 +44,7 @@ def test_same_size_different_bytes_is_changed(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("x = 1\n")
     c: dict = {}
-    cache.record(str(f), c, ())
+    cache.record(str(f), c, (), (), ())
     st = os.stat(f)
     f.write_text("y = 2\n")  # identical length, different content
     os.utime(f, (st.st_atime, st.st_mtime + 100))  # force the hash path
@@ -60,13 +60,17 @@ def test_lookup_miss_returns_none(tmp_path):
     assert cache.lookup(str(f), {}) is None
 
 
-def test_lookup_hit_returns_stored_diags(tmp_path):
+def test_lookup_hit_returns_stored_triple(tmp_path):
+    # A hit replays diagnostics and carries the file's import targets + deferred
+    # findings, so the run can re-resolve cross-file verdicts without re-reading.
     f = tmp_path / "a.py"
     f.write_text("x = 1\n")
     c: dict = {}
     diags = ((1, 5, "X001", "no eval"),)
-    cache.record(str(f), c, diags)
-    assert cache.lookup(str(f), c) == diags
+    targets = ("pkg.mod",)
+    deferred = ((2, 1, "X011", "orphan", "pkg.sig", False),)
+    cache.record(str(f), c, diags, targets, deferred)
+    assert cache.lookup(str(f), c) == (diags, targets, deferred)
 
 
 def test_lookup_clean_hit_returns_empty_not_none(tmp_path):
@@ -74,15 +78,15 @@ def test_lookup_clean_hit_returns_empty_not_none(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("x = 1\n")
     c: dict = {}
-    cache.record(str(f), c, ())
-    assert cache.lookup(str(f), c) == ()
+    cache.record(str(f), c, (), (), ())
+    assert cache.lookup(str(f), c) == ((), (), ())
 
 
 def test_lookup_changed_file_returns_none(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("x = 1\n")
     c: dict = {}
-    cache.record(str(f), c, ((1, 1, "X", "m"),))
+    cache.record(str(f), c, ((1, 1, "X", "m"),), (), ())
     f.write_text("x = 22\n")  # size differs → changed
     assert cache.lookup(str(f), c) is None
 
@@ -92,7 +96,14 @@ def test_lookup_changed_file_returns_none(tmp_path):
 
 def test_write_then_load_round_trip(tmp_path):
     path = tmp_path / "nested" / "cache.pickle"  # parents created by write()
-    c = {"/abs/a.py": (cache.FileData(1.5, 10, "deadbeef"), ((1, 2, "X001", "no"),))}
+    c = {
+        "/abs/a.py": (
+            cache.FileData(1.5, 10, "deadbeef"),
+            ((1, 2, "X001", "no"),),
+            (),
+            (),
+        )
+    }
     cache.write(path, c)
     assert path.is_file()
     assert cache.load(path) == c
