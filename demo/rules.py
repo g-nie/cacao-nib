@@ -1,4 +1,4 @@
-from nib import Diagnostic, Rule, ast
+from nib import UnimportedDiagnostic, Diagnostic, Rule, ast
 
 
 class NoPrint(Rule):
@@ -147,3 +147,23 @@ class NoPickleLoads(Rule):
     def visit_Call(self, node):
         if self.resolve(node.func) in {"pickle.loads", "pickle.load"}:
             return [Diagnostic(node, "pickle.load(s) is unsafe on untrusted data")]
+
+
+class NoUnimportedSetup(Rule):
+    """Cross-file rule: flags a `setup()` entry point that no other file imports
+    by name.
+
+    Shows the cross-file surfaces composing: `self.module` is this file's dotted
+    name, so `f"{self.module}.{node.name}"` is the function's fully-qualified path,
+    and the `UnimportedDiagnostic` defers the "is it imported anywhere" verdict
+    to the end of the run."""
+
+    code = "DEMO011"
+    group = "DEMO"
+
+    def visit_FunctionDef(self, node):
+        if node.name == "setup":
+            qualified = f"{self.module}.{node.name}"
+            return [
+                UnimportedDiagnostic(node, f"{qualified} is never imported", qualified)
+            ]

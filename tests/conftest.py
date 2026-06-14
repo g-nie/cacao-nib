@@ -52,3 +52,20 @@ def run_cli(monkeypatch, capsys, tmp_path_factory):
     for m in set(sys.modules) - modules_snapshot:
         del sys.modules[m]
     nib.cli._find_config.cache_clear()
+
+
+@pytest.fixture
+def make_package(tmp_path):
+    """Factory: write `src` to proj/sub/mod.py under a package layout (so its
+    `__package__` resolves to "proj.sub") and return the module's path."""
+
+    def _make(src: str) -> Path:
+        sub = tmp_path / "proj" / "sub"
+        sub.mkdir(parents=True)
+        (tmp_path / "proj" / "__init__.py").write_text("")
+        (sub / "__init__.py").write_text("")
+        mod = sub / "mod.py"
+        mod.write_text(src)
+        return mod
+
+    return _make

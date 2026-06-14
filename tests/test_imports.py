@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import nib
-import nib.engine
+import nib.analysis
 
 # Placeholder path for tests that lint in-memory source with no relative imports,
 # so the file is never actually stat-walked (only relative imports trigger that).
@@ -41,12 +41,57 @@ def test_import_origin_forms():
         "from x.y import z\n"
         "from x.y import w as v\n"
     )
-    assert nib.engine._collect_imports(nib.ast.parse(src), MODULE) == {
+    assert nib.analysis._collect_imports(nib.ast.parse(src), MODULE) == {
         "a": "a",
         "c": "a.b",
         "z": "x.y.z",
         "v": "x.y.w",
     }
+
+
+# --- _collect_import_targets: the import manifest ----------------------------
+
+
+def _targets(src, file=MODULE):
+    return nib.analysis._collect_import_targets(nib.ast.parse(src), file)
+
+
+def test_collect_import_targets_import_forms():
+    assert _targets("import a.b.c\n") == {"a.b.c"}
+    assert _targets("import a.b as x\n") == {"a.b"}
+    assert _targets("from a.b import c, d\n") == {"a.b", "a.b.c", "a.b.d"}
+
+
+def test_collect_import_targets_star_keeps_only_from_module():
+    assert _targets("from a.b import *\n") == {"a.b"}
+
+
+def test_collect_import_targets_sees_function_local():
+    # Unlike the module-scope name table, the manifest sees function-local
+    # imports — a registering import is often deferred inside a function body.
+    src = "def register():\n    import myapp.plugin\n"
+    assert _targets(src) == {"myapp.plugin"}
+
+
+def test_collect_import_targets_resolves_relative(make_package):
+    mod = make_package("from . import sibling\nfrom ..pkg import thing\n")
+    assert _targets(mod.read_text(), mod) == {
+        "proj.sub",
+        "proj.sub.sibling",
+        "proj.pkg",
+        "proj.pkg.thing",
+    }
+
+
+def test_imported_among_keeps_only_queried_and_imported():
+    # Of the modules a deferred finding asks about, keep those some file imports:
+    # `shared` is queried and imported; `b` is queried but never imported; `os` is
+    # imported but not queried, so it's never materialised. Targets come from the
+    # check pass.
+    targets_per_file = [set(), {"shared", "os"}]  # a file imports shared and os
+    assert nib.analysis.imported_among({"shared", "b"}, targets_per_file) == frozenset(
+        {"shared"}
+    )
 
 
 def test_resolve_attribute_chain():
@@ -72,7 +117,7 @@ def test_top_level_compound_imports_are_collected():
         "except ImportError:\n"
         "    import slow as impl\n"
     )
-    table = nib.engine._collect_imports(nib.ast.parse(src), MODULE)
+    table = nib.analysis._collect_imports(nib.ast.parse(src), MODULE)
     assert table["b"] == "a.b"
     assert table["impl"] == "slow"  # last binding wins
 
@@ -109,21 +154,8 @@ def test_imports_attribute_is_module_scope_only():
 # --- relative imports --------------------------------------------------------
 
 
-def _make_package(tmp_path, src):
-    """Write `src` to proj/sub/mod.py under an installed package layout and
-    return the module's path (so its `__package__` resolves to "proj.sub")."""
-    sub = tmp_path / "proj" / "sub"
-    sub.mkdir(parents=True)
-    (tmp_path / "proj" / "__init__.py").write_text("")
-    (sub / "__init__.py").write_text("")
-    mod = sub / "mod.py"
-    mod.write_text(src)
-    return mod
-
-
-def test_relative_imports_resolve_against_package(tmp_path):
-    mod = _make_package(
-        tmp_path,
+def test_relative_imports_resolve_against_package(make_package):
+    mod = make_package(
         "from . import sibling\n"
         "from ..pkg import thing\n"
         "from .other import func\n"
@@ -138,9 +170,9 @@ def test_relative_imports_resolve_against_package(tmp_path):
     ]
 
 
-def test_relative_beyond_top_level_is_unresolved(tmp_path):
+def test_relative_beyond_top_level_is_unresolved(make_package):
     # `from ...` is level 3, but proj.sub is only 2 deep -> beyond top-level.
-    mod = _make_package(tmp_path, "from ... import x\nx()\n")
+    mod = make_package("from ... import x\nx()\n")
     assert _resolved_in(mod) == [None]
 
 
@@ -151,7 +183,7 @@ def test_relative_without_package_is_unresolved(tmp_path):
     assert _resolved_in(script) == [None]
 
 
-def test_module_package_walks_init_files(tmp_path):
+def test_module_package_and_name_walk_init_files(tmp_path):
     sub = tmp_path / "proj" / "sub"
     sub.mkdir(parents=True)
     (tmp_path / "proj" / "__init__.py").write_text("")
@@ -159,6 +191,12 @@ def test_module_package_walks_init_files(tmp_path):
     (sub / "mod.py").write_text("")
     (tmp_path / "script.py").write_text("")
 
-    assert nib.engine._module_package(sub / "mod.py") == "proj.sub"
-    assert nib.engine._module_package(sub / "__init__.py") == "proj.sub"
-    assert nib.engine._module_package(tmp_path / "script.py") is None
+    # _module_package: the file's __package__ (ascend while __init__.py exists).
+    assert nib.analysis._module_package(sub / "mod.py") == "proj.sub"
+    assert nib.analysis._module_package(sub / "__init__.py") == "proj.sub"
+    assert nib.analysis._module_package(tmp_path / "script.py") is None
+
+    # _module_name: the file's own dotted name (an __init__.py *is* the package).
+    assert nib.analysis._module_name(sub / "mod.py") == "proj.sub.mod"
+    assert nib.analysis._module_name(sub / "__init__.py") == "proj.sub"
+    assert nib.analysis._module_name(tmp_path / "script.py") == "script"
