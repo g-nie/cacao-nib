@@ -115,11 +115,9 @@ nib is benchmarked against a full Django checkout; the results are
 A re-run skips files that haven't changed since they last passed, so repeated
 `nib` invocations are very fast on an unchanged tree. The cache lives in
 `./.cacao_nib_cache`, keyed in two parts: the nib version and enabled rule set
-select the cache file - a new release or a different `--select`/`--ignore`/plugin
-list starts fresh - and within it each file is keyed by path and replayed only
-while unchanged. Both clean and flagged files are cached - an unchanged file's
-diagnostics (none, or the same findings as last time) are replayed from the cache
-without re-parsing, until the file changes.
+select the cache file and within it each file is keyed by path and replayed only
+while unchanged. Both clean and flagged files are cached: until a file changes, its
+diagnostics (none, or last run's findings) are replayed without re-parsing.
 
 ```sh
 nib check --no-cache             # ignore the cache: check every file
