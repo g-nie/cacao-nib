@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781446211793,
+  "lastUpdate": 1781446374145,
   "repoUrl": "https://github.com/g-nie/cacao-nib",
   "entries": {
     "Benchmark": [
@@ -287,6 +287,42 @@ window.BENCHMARK_DATA = {
             "name": "nib check django (cached)",
             "value": 0.22845119600000002,
             "range": "0.0013410470139431359",
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "terzo.giannis@gmail.com",
+            "name": "Giannis Terzopoulos",
+            "username": "g-nie"
+          },
+          "committer": {
+            "email": "terzo.giannis@gmail.com",
+            "name": "Giannis Terzopoulos",
+            "username": "g-nie"
+          },
+          "distinct": true,
+          "id": "f68bfa5080574b35d8001bc6ca410ffe413d249d",
+          "message": "Add cross-file rules via deferred diagnostics\n\nRules can now condition a finding on whether a module is imported elsewhere\nin the run. A visitor returns an `UnimportedDiagnostic` or `ImportedDiagnostic`,\ncarrying a dotted `module` whose reachability decides the verdict.\n\nimplements #13",
+          "timestamp": "2026-06-14T16:11:00+02:00",
+          "tree_id": "388c6ddcb514913a9098b236d39347077e0776d2",
+          "url": "https://github.com/g-nie/cacao-nib/commit/f68bfa5080574b35d8001bc6ca410ffe413d249d"
+        },
+        "date": 1781446373848,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "nib check django (no cache)",
+            "value": 2.894116163,
+            "range": "0.025559444462907",
+            "unit": "s"
+          },
+          {
+            "name": "nib check django (cached)",
+            "value": 0.23020299900000002,
+            "range": "0.0017472212654085423",
             "unit": "s"
           }
         ]
