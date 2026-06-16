@@ -167,3 +167,26 @@ class NoUnimportedSetup(Rule):
             return [
                 UnimportedDiagnostic(node, f"{qualified} is never imported", qualified)
             ]
+
+
+class TooManyFunctions(Rule):
+    """Per-file lifecycle rule: counts module-level-and-nested function defs and
+    flags a module with too many.
+
+    Shows the `enter_module`/`leave_module` hooks: `enter_module` resets the
+    counter for each file (one `Rule` instance is reused across the whole run),
+    `visit_FunctionDef` accumulates, and `leave_module` emits once it has seen the
+    whole module."""
+
+    code = "DEMO012"
+    group = "DEMO"
+
+    def enter_module(self, node):
+        self.def_count = 0
+
+    def visit_FunctionDef(self, node):
+        self.def_count += 1
+
+    def leave_module(self, node):
+        if self.def_count > 50:
+            return [Diagnostic(node, f"module has {self.def_count} functions, max 50")]

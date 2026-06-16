@@ -48,7 +48,7 @@ class Diagnostic:
         "code",
     )
 
-    def __init__(self, node, message: str):
+    def __init__(self, node: ast.AST, message: str):
         # 1-based line and column to match editor/CI conventions and
         # SyntaxError.offset. stdlib ast gives 0-based columns, so we shift.
         self.lineno = getattr(node, "lineno", 1)
@@ -73,7 +73,7 @@ class _DeferredDiagnostic:
     # two concrete subclasses below.
     keep_when_imported: bool
 
-    def __init__(self, node, message: str, module: str):
+    def __init__(self, node: ast.AST, message: str, module: str):
         self.diagnostic = Diagnostic(node, message)
         self.module = module
 
@@ -154,7 +154,7 @@ class Rule:
         file = _file.get()
         return _module_name(file) if file is not None else None
 
-    def resolve(self, node) -> str | None:
+    def resolve(self, node: ast.AST) -> str | None:
         """Fully-qualify a Name/Attribute chain via the module's import table.
 
         `np.array` -> "numpy.array" when `np` was imported as numpy; a bare
@@ -173,6 +173,17 @@ class Rule:
         parts.append(origin)
         parts.reverse()
         return ".".join(parts)
+
+    def enter_module(self, node: ast.AST):
+        """Called once before any visitor fires for this file — the explicit place
+        to set per-file state on `self` (one `Rule` instance is reused across
+        every file in a run). Return diagnostics like a visitor, or None."""
+        return None
+
+    def leave_module(self, node: ast.AST):
+        """Called once after every visitor has fired for this file. Return summary
+        diagnostics that depend on having seen the whole module, or None."""
+        return None
 
 
 def _rule_visitors(cls: type) -> dict[type, str]:
@@ -198,7 +209,7 @@ def _rule_visitors(cls: type) -> dict[type, str]:
 _fields_cache: dict[type, tuple] = {}
 
 
-def _child_nodes(node):
+def _child_nodes(node: ast.AST) -> list[ast.AST]:
     """Return a list of `node`'s direct AST children.
 
     Deliberately not using `ast.iter_child_nodes`. The stdlib version is two nested
@@ -244,50 +255,64 @@ def _run(
                 (r, getattr(r, method_name), method_name)
             )
 
-    def walk(node):
+    def dispatch(
+        out: list[Diagnostic | _DeferredDiagnostic] | None, rule: Rule, method: str
+    ) -> None:
+        """Handle what a visitor or hook returned: tag each item with the rule's
+        code and sort it into the immediate (`Diagnostic`) or deferred
+        (`_DeferredDiagnostic`) results, warning on anything that breaks the expected
+        `list[Diagnostic | _DeferredDiagnostic] | None` shape."""
+        if out is None:
+            return
+        cls_name = type(rule).__name__
+        if isinstance(out, (Diagnostic, _DeferredDiagnostic)):
+            _warn(
+                f"{cls_name}.{method} returned a single {type(out).__name__}; "
+                "wrap it in a list"
+            )
+            out = [out]
+        try:
+            items = list(out)
+        except TypeError:
+            _warn(
+                f"{cls_name}.{method} returned non-iterable "
+                f"{type(out).__name__}; expected list of Diagnostic"
+            )
+            return
+        rule_code = getattr(type(rule), "code", "")
+        for item in items:
+            if isinstance(item, Diagnostic):
+                item.code = rule_code
+                results.append(item)
+            elif isinstance(item, _DeferredDiagnostic):
+                item.diagnostic.code = rule_code
+                deferred.append(item)
+            else:
+                _warn(
+                    f"{cls_name}.{method} returned list contained "
+                    f"{type(item).__name__}; expected Diagnostic (dropped)"
+                )
+
+    def walk(node: ast.AST) -> None:
         handlers = visitors_by_node_type.get(type(node))
         if handlers is not None:
             for rule, fn, method in handlers:
-                out = fn(node)
-                if out is None:
-                    continue
-                cls_name = type(rule).__name__
-                if isinstance(out, (Diagnostic, _DeferredDiagnostic)):
-                    _warn(
-                        f"{cls_name}.{method} returned a single {type(out).__name__}; "
-                        "wrap it in a list"
-                    )
-                    out = [out]
-                try:
-                    items = list(out)
-                except TypeError:
-                    _warn(
-                        f"{cls_name}.{method} returned non-iterable "
-                        f"{type(out).__name__}; expected list of Diagnostic"
-                    )
-                    continue
-                rule_code = getattr(type(rule), "code", "")
-                for item in items:
-                    if isinstance(item, Diagnostic):
-                        item.code = rule_code
-                        results.append(item)
-                    elif isinstance(item, _DeferredDiagnostic):
-                        item.diagnostic.code = rule_code
-                        deferred.append(item)
-                    else:
-                        _warn(
-                            f"{cls_name}.{method} returned list contained "
-                            f"{type(item).__name__}; expected Diagnostic (dropped)"
-                        )
+                dispatch(fn(node), rule, method)
         for child in _child_nodes(node):
             walk(child)
 
     # Expose this run's context (import table, file) to the rule properties for
     # the duration of the walk only; then restore, so none of it leaks past it.
+    # The hooks run inside the same window, so `self.imports`/`self.module` work.
+    # The base hooks are no-ops returning None, which `dispatch` ignores.
     import_token = _imports.set(_collect_imports(module, file))
     file_token = _file.set(file)
     try:
+        for r in rules:
+            dispatch(r.enter_module(module), r, "enter_module")
         walk(module)
+        for r in rules:
+            dispatch(r.leave_module(module), r, "leave_module")
     finally:
         _imports.reset(import_token)
         _file.reset(file_token)

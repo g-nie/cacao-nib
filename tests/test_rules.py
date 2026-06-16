@@ -4,7 +4,7 @@ import pytest
 
 import nib
 import nib.engine
-from nib import Diagnostic, ast
+from nib import Diagnostic, UnimportedDiagnostic, ast
 
 # Placeholder path for tests that lint in-memory source with no relative imports,
 # so the file is never actually stat-walked (only relative imports trigger that).
@@ -141,3 +141,81 @@ def test_multiple_diagnostics_from_one_node():
     diags = nib.run(mod, [FlagEachArg()], MODULE)
     assert len(diags) == 3
     assert all(d.code == "ARG" for d in diags)
+
+
+# --- per-file lifecycle hooks: enter_module / leave_module -----------------
+
+
+class CountDefs(nib.Rule):
+    code = "CNT"
+
+    def enter_module(self, node):
+        self.defs = 0
+
+    def visit_FunctionDef(self, node):
+        self.defs += 1
+
+    def leave_module(self, node):
+        return [Diagnostic(node, f"{self.defs} defs")]
+
+
+def test_enter_module_resets_state_between_files():
+    # One instance reused across files (as the CLI does): enter_module must zero
+    # the counter each run, so the second file isn't polluted by the first.
+    rule = CountDefs()
+    f1 = nib.run(nib.ast.parse("def a(): pass\ndef b(): pass\n"), [rule], MODULE)
+    f2 = nib.run(nib.ast.parse("def only(): pass\n"), [rule], MODULE)
+    assert f1[0].message == "2 defs"
+    assert f2[0].message == "1 defs"  # not "3 defs" -> state was reset
+
+
+def test_leave_module_sees_whole_module_and_tags_code():
+    src = "def a(): pass\ndef b(): pass\ndef c(): pass\n"
+    diags = nib.run(nib.ast.parse(src), [CountDefs()], MODULE)
+    assert len(diags) == 1
+    assert diags[0].code == "CNT"  # tagged with the rule's code, like a visitor
+    assert diags[0].message == "3 defs"
+
+
+def test_enter_module_can_emit():
+    class Greet(nib.Rule):
+        code = "E"
+
+        def enter_module(self, node):
+            return [Diagnostic(node, "entered")]
+
+    diags = nib.run(nib.ast.parse(""), [Greet()], MODULE)
+    assert [(d.code, d.message) for d in diags] == [("E", "entered")]
+
+
+def test_hook_call_order_enter_then_module_then_leave():
+    order = []
+
+    class Track(nib.Rule):
+        code = "T"
+
+        def enter_module(self, node):
+            order.append("enter")
+
+        def visit_Module(self, node):
+            order.append("module")
+
+        def leave_module(self, node):
+            order.append("leave")
+
+    nib.run(nib.ast.parse("x = 1\n"), [Track()], MODULE)
+    assert order == ["enter", "module", "leave"]
+
+
+def test_leave_module_deferred_resolves_like_a_visitor():
+    # A deferred finding returned from leave_module flows through the same
+    # deferred path as a visitor's, resolved against `imported`.
+    class R(nib.Rule):
+        code = "R"
+
+        def leave_module(self, node):
+            return [UnimportedDiagnostic(node, "orphan", "pkg.mod")]
+
+    mod = nib.ast.parse("")
+    assert len(nib.run(mod, [R()], MODULE, imported=frozenset())) == 1
+    assert nib.run(mod, [R()], MODULE, imported=frozenset({"pkg.mod"})) == []
