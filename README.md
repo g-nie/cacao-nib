@@ -47,9 +47,14 @@ CLI `--select` / `--ignore` replace their config counterparts;
 `--extend-select` / `--extend-ignore` add to them. Each token is matched
 exactly against either a rule's `code` or a rule's `group`.
 
-Each entry in `plugins` is just an importable module name: nib imports it and
-the `Rule` subclasses defined there register themselves. So a plugin can be a
+Each entry in `plugins` is just an importable module name: nib imports it with
+[`importlib.import_module`](https://docs.python.org/3/library/importlib.html#importlib.import_module)
+and the `Rule` subclasses defined there register themselves. So a plugin can be a
 third-party package you `pip install`, or a module that  lives in your own repo.
+Anything that resolves under a normal import works: list several
+(`plugins = ["a", "b"]`, or repeat `--plugins`), or point at a package. A package
+only runs its `__init__.py`, though, so re-export the rule submodules there (or name
+them directly, e.g. `nib_rules.style`).
 
 ### In-repo rules (no install needed)
 
