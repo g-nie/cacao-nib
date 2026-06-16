@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781635000801,
+  "lastUpdate": 1781637436589,
   "repoUrl": "https://github.com/g-nie/cacao-nib",
   "entries": {
     "Benchmark": [
@@ -503,6 +503,42 @@ window.BENCHMARK_DATA = {
             "name": "nib check django (cached)",
             "value": 0.238245119,
             "range": "0.00365692324776813",
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "terzo.giannis@gmail.com",
+            "name": "Giannis Terzopoulos",
+            "username": "g-nie"
+          },
+          "committer": {
+            "email": "terzo.giannis@gmail.com",
+            "name": "Giannis Terzopoulos",
+            "username": "g-nie"
+          },
+          "distinct": true,
+          "id": "9eac7355f746609507f1b6546e28a30e0cfe2a10",
+          "message": "Add per-file lifecycle hooks (enter_module / leave_module)\n\nA Rule instance is reused across files, so anything stored on self leaks\nfrom one file to the next. Add two optional no-op hooks: enter_module\n(before any visitor: reset state) and leave_module (after all visitors:\nemit whole-module summaries). Both return diagnostics like a visitor,\nrouted through the same dispatch.\n\nimplements #9",
+          "timestamp": "2026-06-16T21:16:23+02:00",
+          "tree_id": "15c69934bcf31b97689a8150eb24c469dcaaf3e2",
+          "url": "https://github.com/g-nie/cacao-nib/commit/9eac7355f746609507f1b6546e28a30e0cfe2a10"
+        },
+        "date": 1781637435630,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "nib check django (no cache)",
+            "value": 2.950087068,
+            "range": "0.04102632652326675",
+            "unit": "s"
+          },
+          {
+            "name": "nib check django (cached)",
+            "value": 0.23176632700000002,
+            "range": "0.0006073487223151159",
             "unit": "s"
           }
         ]
