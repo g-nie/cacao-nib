@@ -94,6 +94,40 @@ Subclassing `Rule` auto-registers it; the `visit_<AstName>` methods mirror
 dispatch. `code` identifies the individual rule; `group` (optional) is a category label
 shared by related rules so users can  select/ignore them as a set.
 
+A visitor can also return an `UnimportedDiagnostic`/`ImportedDiagnostic` to defer a
+finding to whether its module is imported anywhere in the run (cross-file rules).
+
+### Per-file state: `enter_module` / `leave_module`
+
+One `Rule` instance is built once and reused for every file in the run, so any
+state you store on `self` carries over from one file to the next. Two optional hooks
+give a clean per-file boundary, each receiving the module's root node:
+
+- `enter_module(node)` runs before any visitor for the file. Reset per-file
+  state here.
+- `leave_module(node)` runs after every visitor for the file. The place to emit
+  a summary that needs the whole module.
+
+Both default to no-ops and may return diagnostics just like a visitor.
+
+```python
+class TooManyFunctions(Rule):
+    code = "X999"
+
+    def enter_module(self, node):
+        self.defs = 0  # reset for each file
+
+    def visit_FunctionDef(self, node):
+        self.defs += 1
+
+    def leave_module(self, node):
+        if self.defs > 50:
+            return [Diagnostic(node, f"module has {self.defs} functions, max 50")]
+```
+
+`enter_module` is the explicit per-file setup hook; `visit_Module` also works but
+fires inside the walk.
+
 ## Suppressing diagnostics
 
 ```python

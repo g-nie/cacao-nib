@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- Add per-file lifecycle hooks `enter_module(node)` / `leave_module(node)` to
+  `Rule`. `enter_module` runs before a file's visitors (reset per-file state here)
+  and `leave_module` runs after them (emit summaries that need the whole module).
+  Both default to no-ops and may return diagnostics like a visitor.
 
 ## [0.2.0] - 2026-06-14
 
