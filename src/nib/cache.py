@@ -15,14 +15,14 @@ diagnostic list.
 """
 
 import contextlib
-import functools
 import hashlib
 import os
 import pickle
 import tempfile
-from importlib import metadata
 from pathlib import Path
 from typing import NamedTuple, Self
+
+from nib.utils import nib_version
 
 CACHE_DIR_ENV = "NIB_CACHE_DIR"
 DEFAULT_CACHE_DIR = ".cacao_nib_cache"
@@ -50,14 +50,6 @@ class FileData(NamedTuple):
 # the file's import targets, and its (unresolved) deferred findings.
 Entry = tuple[FileData, tuple[Diag, ...], tuple[str, ...], tuple[DeferredDiag, ...]]
 Cache = dict[str, Entry]
-
-
-@functools.cache
-def _nib_version() -> str:
-    try:
-        return metadata.version("cacao-nib")
-    except metadata.PackageNotFoundError:
-        return "unknown"
 
 
 def ruleset_hash(rule_classes) -> str:
@@ -92,7 +84,7 @@ def cache_file(
         or os.environ.get(CACHE_DIR_ENV)
         or (root or Path.cwd()) / DEFAULT_CACHE_DIR
     )
-    return base / _nib_version() / f"cache.{ruleset}.pickle"
+    return base / nib_version() / f"cache.{ruleset}.pickle"
 
 
 def load(path: Path) -> Cache:

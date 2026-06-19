@@ -10,6 +10,7 @@ from pathlib import Path
 
 from nib import Rule, cache, parallel
 from nib.analysis import imported_among
+from nib.utils import nib_version
 from nib.engine import (
     FileError,
     _check_file,
@@ -270,8 +271,18 @@ def _cmd_rules(args) -> int:
     return EXIT_OK
 
 
+def _version_string() -> str:
+    return f"nib {nib_version()}"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nib")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=_version_string(),
+        help="display nib's version",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     # Shared `--plugins` flag attached to every subcommand that loads rules.
@@ -346,6 +357,7 @@ def _build_parser() -> argparse.ArgumentParser:
         parents=[plugins_parent],
         help="list every registered rule, grouped by `group`",
     )
+    sub.add_parser("version", help="display nib's version")
 
     return parser
 
@@ -537,6 +549,10 @@ def main() -> int:
 def _run_cli() -> int:
     parser = _build_parser()
     args = parser.parse_args()
+
+    if args.cmd == "version":
+        print(_version_string())
+        return EXIT_OK
 
     if args.cmd == "rules":
         return _cmd_rules(args)
