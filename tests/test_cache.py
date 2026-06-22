@@ -66,9 +66,9 @@ def test_lookup_hit_returns_stored_triple(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("x = 1\n")
     c: dict = {}
-    diags = ((1, 5, "X001", "no eval"),)
+    diags = ((1, 5, 1, 14, "X001", "no eval"),)
     targets = ("pkg.mod",)
-    deferred = ((2, 1, "X011", "orphan", "pkg.sig", False),)
+    deferred = ((2, 1, 2, 8, "X011", "orphan", "pkg.sig", False),)
     cache.record(str(f), c, diags, targets, deferred)
     assert cache.lookup(str(f), c) == (diags, targets, deferred)
 
@@ -86,7 +86,7 @@ def test_lookup_changed_file_returns_none(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("x = 1\n")
     c: dict = {}
-    cache.record(str(f), c, ((1, 1, "X", "m"),), (), ())
+    cache.record(str(f), c, ((1, 1, 1, 2, "X", "m"),), (), ())
     f.write_text("x = 22\n")  # size differs → changed
     assert cache.lookup(str(f), c) is None
 

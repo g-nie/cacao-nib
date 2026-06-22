@@ -22,6 +22,7 @@ nib check path/to/file.py
 nib check --plugins nib_rules
 nib check --select X001,DJ                  # only these codes/groups
 nib check --ignore X002 --extend-ignore DJ  # ignore X002, then also skip the DJ group
+nib check --format concise                  # one-line output
 ```
 
 Run `nib --help` for the full set of options; each subcommand takes `--help`

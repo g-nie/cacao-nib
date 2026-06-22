@@ -32,6 +32,9 @@ def run_cli(monkeypatch, capsys, tmp_path_factory):
     monkeypatch.setenv("NIB_CACHE_DIR", str(tmp_path_factory.mktemp("nib_cache")))
 
     def run(*args: str, cwd: Path = PROJECT_ROOT) -> SimpleNamespace:
+        # Pin `check` to the concise one-line format.
+        if args and args[0] == "check" and "--format" not in args:
+            args = (*args, "--format", "concise")
         monkeypatch.chdir(cwd)
         monkeypatch.setattr(sys, "argv", ["nib", *args])
         nib.cli._find_config.cache_clear()
