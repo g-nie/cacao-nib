@@ -3,6 +3,7 @@ import ast
 import contextlib
 import functools
 import importlib
+import linecache
 import os
 import re
 import sys
@@ -207,7 +208,7 @@ def _load_plugins(plugins_arg: list[str]) -> int:
         try:
             importlib.import_module(mod_name)
         except SyntaxError as e:
-            _print_diagnostic(
+            _print_diagnostic_concise(
                 e.filename or mod_name, e.lineno, e.offset, "invalid-syntax", e.msg
             )
             return EXIT_DIAGNOSTICS
@@ -221,7 +222,7 @@ def _load_plugins(plugins_arg: list[str]) -> int:
     return EXIT_OK
 
 
-def _print_diagnostic(file, lineno: int, col: int, code: str, message: str):
+def _print_diagnostic_concise(file, lineno: int, col: int, code: str, message: str):
     """Render a diagnostic line on stdout in the canonical `path:line:col`
     format. `lineno` and `col` are 1-based; `None` falls back to 1 so callers
     can pass `SyntaxError.lineno`/`offset` directly."""
@@ -231,7 +232,45 @@ def _print_diagnostic(file, lineno: int, col: int, code: str, message: str):
     )
 
 
-def _docstring_summary(cls) -> str:
+def _print_diagnostic_full(
+    file, lineno: int, col: int, end_lineno, end_col, code: str, message: str
+):
+    """Print a diagnostic in the expanded format: a header, a `--> path:line:col`
+    location, and the source line in context with a caret span underneath.
+    Falls back to header + location when the source isn't available"""
+    lineno = lineno or 1
+    col = col or 1
+    pipe = _c("|", "94", "1")
+    header = f"{_c('error', '31')}[{_c(code, '1', '4')}] {message}"
+    location = f"  {_c('-->', '94', '1')} {file}:{lineno}:{col}"
+    lines = linecache.getlines(file)
+    if not lines or not (1 <= lineno <= len(lines)):
+        print(f"{header}\n{location}\n")
+        return
+
+    context = 2  # source lines shown on each side of the flagged line
+    first = max(1, lineno - context)
+    last = min(len(lines), lineno + context)
+    gutter = len(str(last))  # width to right-align line numbers in the window
+    sep = f"{' ' * gutter} {pipe}"  # blank gutter + pipe (top/bottom and caret rows)
+
+    out = [header, location, sep]
+    for n in range(first, last + 1):
+        text = lines[n - 1].rstrip("\n")
+        out.append(f"{_c(str(n).rjust(gutter), '94', '1')} {pipe} {text}")
+        if n == lineno:
+            if end_lineno == lineno and end_col is not None:
+                width = max(1, end_col - col)
+            else:
+                width = max(1, len(text) - (col - 1))
+            carets = _c("^" * width, "31", "1")
+            out.append(f"{sep} {' ' * (col - 1)}{carets}")
+    out.append(sep)
+    out.append("")  # blank line between diagnostics
+    print("\n".join(out))
+
+
+def _summary_from_docstring(cls) -> str:
     """One-line summary from `cls.__doc__`: the first paragraph (up to a blank
     line) with its internal line breaks collapsed to single spaces. Keeps each
     rule on one line in `nib rules` without truncating a summary that happens to
@@ -265,7 +304,7 @@ def _cmd_rules(args) -> int:
         for cls in sorted(by_group[group], key=lambda c: (c.code or "", c.__name__)):
             code = cls.code or "(no code)"
             line = f"  {_c(code, '1', '4')} {cls.__name__}"
-            if summary := _docstring_summary(cls):
+            if summary := _summary_from_docstring(cls):
                 line += f" — {summary}"
             print(line)
     return EXIT_OK
@@ -341,6 +380,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="apply directory excludes even to paths passed explicitly on the CLI.",
     )
     check.add_argument(
+        "--format",
+        choices=["full", "concise"],
+        default="full",
+    )
+    check.add_argument(
         "--no-cache",
         action="store_true",
         help="bypass the result cache (no read, no write); check every file.",
@@ -383,30 +427,41 @@ def _process_checked(
     if err_wire is not None:
         err = FileError(*err_wire)
         if err.kind == "syntax":
-            return [(err.lineno, err.offset, "invalid-syntax", err.message)], (), []
+            return (
+                [(err.lineno, err.offset, None, None, "invalid-syntax", err.message)],
+                (),
+                [],
+            )
         # err.kind == "read"
         print(f"{file_str}: skipped ({err.exc_type}: {err.message})", file=sys.stderr)
         return None
     suppressions = _parse_line_suppressions(source) if source else {}
     diags = [
-        (lineno, col, code, message)
-        for lineno, col, _el, _ec, message, code in diag_tuples
+        (lineno, col, end_lineno, end_col, code, message)
+        for lineno, col, end_lineno, end_col, message, code in diag_tuples
         if not _is_suppressed(lineno, code, suppressions)
     ]
     deferred = [
-        (lineno, col, code, message, module, keep)
-        for lineno, col, _el, _ec, message, code, module, keep in deferred_tuples
+        (lineno, col, end_lineno, end_col, code, message, module, keep)
+        for lineno, col, end_lineno, end_col, message, code, module, keep in deferred_tuples
         if not _is_suppressed(lineno, code, suppressions)
     ]
     return diags, targets, deferred
 
 
-def _emit_diags(file_str: str, diags) -> int:
-    """Print each `(lineno, col, code, message)` for `file_str` and return the
-    count — renders freshly-checked files, cache hits, and surviving deferred
-    findings alike."""
-    for lineno, col, code, message in diags:
-        _print_diagnostic(file_str, lineno, col, code, message)
+def _emit_diags(file_str: str, diags, fmt: str = "full") -> int:
+    """Print each `(lineno, col, end_lineno, end_col, code, message)` for
+    `file_str` and return the count — renders freshly-checked files, cache hits,
+    and surviving deferred findings alike.
+    `fmt` picks the layout: `concise` is the one-line form, `full` adds a source
+    snippet with a caret span."""
+    for lineno, col, end_lineno, end_col, code, message in diags:
+        if fmt == "concise":
+            _print_diagnostic_concise(file_str, lineno, col, code, message)
+        else:
+            _print_diagnostic_full(
+                file_str, lineno, col, end_lineno, end_col, code, message
+            )
     return len(diags)
 
 
@@ -432,7 +487,7 @@ def _dispatch_checks(files, rules, plugins, select, ignore):
 
 
 def _emit(
-    files, cache_hits, results, session: cache.Session
+    files, cache_hits, results, session: cache.Session, fmt: str = "full"
 ) -> tuple[int, list[tuple[str, ...]], list[tuple[str, list[cache.DeferredDiag]]]]:
     """Walk `files` in order: replay a cache hit inline, else pull the next
     checked result (misses arrive in `files` order). Immediate findings stream as
@@ -461,7 +516,7 @@ def _emit(
                     continue
                 diags, targets, deferred = processed
                 session.record(file_str, tuple(diags), targets, tuple(deferred))
-            issues += _emit_diags(file_str, diags)
+            issues += _emit_diags(file_str, diags, fmt)
             targets_per_file.append(targets)
             if deferred:
                 deferred_holds.append((file_str, deferred))
@@ -501,15 +556,20 @@ def _reachability_targets(
 def _resolve_deferred(
     deferred_holds: list[tuple[str, list[cache.DeferredDiag]]],
     reachable: list[tuple[str, ...]],
+    fmt: str = "full",
 ) -> int:
     """Resolve held deferred findings against `reachable` (every project file's
-    import targets) and print the survivors in file order. Returns the count."""
-    gated = {d[4] for _f, deferred in deferred_holds for d in deferred}
+    import targets) and print the survivors in file order. Returns the count.
+
+    A `DeferredDiag` is `(lineno, col, end_lineno, end_col, code, message, module,
+    keep)`: the first six fields are the printable diagnostic, the last two gate it
+    on `module`'s reachability."""
+    gated = {d[6] for _f, deferred in deferred_holds for d in deferred}
     imported = imported_among(gated, reachable)
     issues = 0
     for file_str, deferred in deferred_holds:
-        survivors = [d[:4] for d in deferred if _keep_deferred(d[4], d[5], imported)]
-        issues += _emit_diags(file_str, survivors)
+        survivors = [d[:6] for d in deferred if _keep_deferred(d[6], d[7], imported)]
+        issues += _emit_diags(file_str, survivors, fmt)
     return issues
 
 
@@ -602,7 +662,7 @@ def _run_cli() -> int:
 
     results = _dispatch_checks(cache_misses, rules, plugins, select, ignore)
     issues, targets_per_file, deferred_holds = _emit(
-        files, cache_hits, results, session
+        files, cache_hits, results, session, args.format
     )
     if deferred_holds:
         # A cross-file rule fired: resolve its findings against the whole project,
@@ -611,7 +671,9 @@ def _run_cli() -> int:
         # deferred finding is held).
         checked = {os.path.abspath(str(f)) for f in files}
         extra = _reachability_targets(args.paths, checked, session, args.force_exclude)
-        issues += _resolve_deferred(deferred_holds, targets_per_file + extra)
+        issues += _resolve_deferred(
+            deferred_holds, targets_per_file + extra, args.format
+        )
     session.flush()
 
     print(f"Found {issues} issue{'s' if issues != 1 else ''}.")

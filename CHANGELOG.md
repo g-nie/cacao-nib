@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add an expanded default diagnostic format: each finding shows the offending
+  source line in context with a caret span underneath. `--format concise` keeps
+  the one-line output.
 - Add per-file lifecycle hooks `enter_module(node)` / `leave_module(node)` to
   `Rule`. `enter_module` runs before a file's visitors (reset per-file state here)
   and `leave_module` runs after them (emit summaries that need the whole module).

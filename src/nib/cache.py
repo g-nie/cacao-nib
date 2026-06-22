@@ -28,16 +28,18 @@ CACHE_DIR_ENV = "NIB_CACHE_DIR"
 DEFAULT_CACHE_DIR = ".cacao_nib_cache"
 
 
-# One emitted diagnostic, post-noqa: (lineno, col, code, message). Enough to
-# re-print the exact `path:line:col` line on a cache hit without re-parsing.
-Diag = tuple[int, int, str, str]
+# One emitted diagnostic, post-noqa: (lineno, col, end_lineno, end_col, code,
+# message). The end span (end_lineno, end_col) lets a cache hit re-render the caret
+# span in the expanded format without re-parsing; both are None when the node didn't
+# carry them.
+Diag = tuple[int, int, int | None, int | None, str, str]
 
 # A noqa-filtered deferred finding: a `Diag` plus the dotted module it depends on
 # and whether it fires when that module is imported (vs. imported nowhere). Its
 # verdict is re-resolved every run (against the project's imported set), so caching
 # it can't go stale when some *other* file's imports change.
-# Print it via its first four fields; re-resolve via the last two.
-DeferredDiag = tuple[int, int, str, str, str, bool]
+# Print it via its first six fields; re-resolve via the last two.
+DeferredDiag = tuple[int, int, int | None, int | None, str, str, str, bool]
 
 
 class FileData(NamedTuple):

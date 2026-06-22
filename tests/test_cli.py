@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import nib.cli
 from helpers import error_lines, noqa_plugin, reported_codes, three_rule_plugin
 
 
@@ -28,8 +29,10 @@ def test_check_dir_with_demo_plugin_flags_all_demo_codes(run_cli):
     }
 
 
-def test_check_single_file_full_output(run_cli):
-    result = run_cli("check", "demo/sample.py", "--plugins", "demo.rules")
+def test_check_single_file_concise_output(run_cli):
+    result = run_cli(
+        "check", "demo/sample.py", "--plugins", "demo.rules", "--format", "concise"
+    )
     assert result.returncode == 1
     assert result.stdout.splitlines() == [
         "demo/sample.py:5:5: error[DEMO001] no print()",
@@ -52,6 +55,78 @@ def test_check_single_file_full_output(run_cli):
         "demo/sample.py:33:1: error[DEMO011] sample.setup is never imported",
         "Found 11 issues.",
     ]
+
+
+def test_format_defaults_to_full():
+    assert nib.cli._build_parser().parse_args(["check"]).format == "full"
+
+
+def test_full_format_renders_snippet_with_caret(run_cli):
+    result = run_cli(
+        "check", "demo/sample.py", "--plugins", "demo.rules", "--format", "full"
+    )
+    assert result.returncode == 1
+    out = result.stdout
+    # Header keeps the `error[CODE]` token; a `-->` location and a caret row follow.
+    assert "error[DEMO001] no print()" in out
+    assert "  --> demo/sample.py:5:5" in out
+    # The flagged source line appears in a gutter, with carets under it.
+    assert "5 |     print(f" in out
+    caret_rows = [ln for ln in out.splitlines() if ln.lstrip().startswith("| ^")]
+    assert any("^^^^" in ln for ln in caret_rows)
+
+
+def _render_full(tmp_path, capsys, src, lineno, col, end_lineno, end_col):
+    # Render one full-format diagnostic over `src` and return the printed lines
+    f = tmp_path / "m.py"
+    f.write_text(src)
+    nib.cli._print_diagnostic_full(str(f), lineno, col, end_lineno, end_col, "C", "msg")
+    return capsys.readouterr().out.splitlines()
+
+
+def test_full_render_single_line_caret_spans_start_to_end_col(tmp_path, capsys):
+    out = _render_full(tmp_path, capsys, "x = eval('hi')\n", 1, 5, 1, 14)
+    assert out[0] == "error[C] msg"
+    assert out[1].endswith("m.py:1:5") and out[1].startswith("  --> ")
+    assert "1 | x = eval('hi')" in out
+    assert "  |     ^^^^^^^^^" in out  # 9 carets: cols 5..14, under `eval('hi')`
+
+
+def test_full_render_context_window_and_gutter_alignment(tmp_path, capsys):
+    src = "".join(f"line {n}\n" for n in range(1, 13))  # 12 lines
+    out = _render_full(tmp_path, capsys, src, 10, 1, 10, 5)
+    assert " 8 | line 8" in out  # right-aligned to width 2
+    assert "10 | line 10" in out
+    assert "12 | line 12" in out
+    assert "   | ^^^^" in out  # caret row aligns under the 2-wide gutter
+
+
+def test_full_render_multi_line_span_carets_only_start_line(tmp_path, capsys):
+    out = _render_full(tmp_path, capsys, "def f(\n    a, b,\n): pass\n", 1, 1, 3, 8)
+    caret_rows = [ln for ln in out if "^" in ln]
+    assert caret_rows == ["  | ^^^^^^"]  # end is on line 3 → only len("def f(") == 6
+
+
+def test_full_render_missing_end_col_carets_to_end_of_line(tmp_path, capsys):
+    out = _render_full(tmp_path, capsys, "abcd\n", 1, 2, None, None)
+    caret_rows = [ln for ln in out if "^" in ln]
+    assert caret_rows == ["  |  ^^^"]  # cols 2..4 of "abcd"
+
+
+def test_full_format_separates_diagnostics_with_blank_line(tmp_path, capsys):
+    f = tmp_path / "m.py"
+    f.write_text("a = 1\nb = 2\n")
+    diags = [(1, 1, 1, 2, "C1", "first"), (2, 1, 2, 2, "C2", "second")]
+    nib.cli._emit_diags(str(f), diags, "full")
+    out = capsys.readouterr().out
+    assert "\n\nerror[C2] second" in out  # blank line between the two blocks
+
+
+def test_full_render_out_of_range_lineno_falls_back(tmp_path, capsys):
+    out = _render_full(tmp_path, capsys, "x = 1\n", 99, 1, 99, 2)
+    assert out[0] == "error[C] msg"
+    assert out[1].endswith("m.py:99:1")
+    assert not any("|" in ln for ln in out)  # no snippet block
 
 
 def test_check_uses_pyproject_tool_nib_plugins_without_flag(run_cli, tmp_path):
