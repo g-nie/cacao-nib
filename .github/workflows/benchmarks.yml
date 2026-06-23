@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write  # github-action-benchmark pushes history to gh-pages
+      pull-requests: write  # comment-on-alert posts the regression comment on PRs
     env:
       DJANGO_REF: '6.0.5'  # Django release tag; bump to retarget the benchmark.
 
