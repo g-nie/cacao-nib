@@ -665,10 +665,9 @@ def _run_cli() -> int:
         files, cache_hits, results, session, args.format
     )
     if deferred_holds:
-        # A cross-file rule fired: resolve its findings against the whole project,
-        # not just the files passed this run — scan the enclosing package tree(s)
-        # for the imports those verdicts hinge on (cheap, and skipped when no
-        # deferred finding is held).
+        # A cross-file rule fired. Its findings depend on what the whole project
+        # imports, not just the files checked this run, so scan the surrounding
+        # package(s) for those imports. Only runs when there's a deferred finding.
         checked = {os.path.abspath(str(f)) for f in files}
         extra = _reachability_targets(args.paths, checked, session, args.force_exclude)
         issues += _resolve_deferred(
