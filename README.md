@@ -57,7 +57,7 @@ Anything that resolves under a normal import works: list several
 only runs its `__init__.py`, though, so re-export the rule submodules there (or name
 them directly, e.g. `nib_rules.style`).
 
-### In-repo rules (no install needed)
+### In-repo rules
 
 The plugin doesn't have to be a published package. nib prepends the project
 root (the directory of the `pyproject.toml` it found) to `sys.path` before
